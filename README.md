@@ -7,7 +7,7 @@ walk. There is no networking and no remote control.
 ## Hardware
 
 Photos: [the robot](16%20DOF%20Robot.jpg) (3 servos per arm, 5 per leg) and
-[the ESP32-S3 on its extension board](ESP32-Extension%20Biard.jpg).
+[the ESP32-S3 on its extension board](ESP32-Extension%20Board.jpg).
 
 The board is an ESP32-S3-N16R8 module (16 MB flash, 8 MB octal PSRAM) on a DevKitC-style
 board with two USB-C ports, plugged into an "ESP32 Extension Board" (DC 6.5-9 V barrel jack,
