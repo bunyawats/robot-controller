@@ -149,13 +149,13 @@ mod tests {
     #[test]
     fn motion_is_monotonic_with_no_overshoot() {
         let mut robot = Robot::new(MockHw::default());
-        let target = Pose::neutral().with(Joint::RKnee, 30.0);
+        let target = Pose::neutral().with(Joint::RKneeUpper, 30.0);
         robot.move_to(&target, 600);
         let values: Vec<f32> = robot
             .hardware_mut()
             .poses
             .iter()
-            .map(|p| p.get(Joint::RKnee))
+            .map(|p| p.get(Joint::RKneeUpper))
             .collect();
         for w in values.windows(2) {
             assert!(w[1] >= w[0]);
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn add_is_relative_and_with_is_absolute() {
-        let p = Pose::neutral().with(Joint::RKnee, 20.0).add(Joint::RKnee, 5.0);
-        assert_eq!(p.get(Joint::RKnee), 115.0);
+        let p = Pose::neutral().with(Joint::RKneeUpper, 20.0).add(Joint::RKneeUpper, 5.0);
+        assert_eq!(p.get(Joint::RKneeUpper), 115.0);
     }
 }

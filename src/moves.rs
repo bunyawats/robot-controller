@@ -67,20 +67,20 @@ pub fn arm_up_down<H: Hardware>(robot: &mut Robot<H>, arm: Arm, times: u32) {
 /// Gait tuning. Start small and increase slowly.
 #[derive(Clone, Copy, Debug)]
 pub struct Gait {
-    /// Sideways lean over the support foot while the other foot is in the air.
+    /// Sideways lean over the support foot while the other foot is unloaded.
     pub lean_deg: f32,
-    /// Total hip swing between a leg's backmost and foremost position.
+    /// Total swing of the knee pair between a leg's backmost and foremost position.
     pub stride_deg: f32,
-    /// Knee bend used to lift the swinging foot off the ground.
-    pub knee_bend_deg: f32,
+    /// Extra outward hip roll on the swinging leg so its foot clears the ground.
+    pub lift_deg: f32,
     /// Duration of each of the five phases of a step.
     pub phase_ms: u32,
 }
 
 pub const DEFAULT_GAIT: Gait = Gait {
     lean_deg: 8.0,
-    stride_deg: 14.0,
-    knee_bend_deg: 22.0,
+    stride_deg: 30.0,
+    lift_deg: 6.0,
     phase_ms: 300,
 };
 
@@ -103,59 +103,69 @@ impl Side {
             Side::Left => 1,
         }
     }
+    /// Sign of a roll that tilts this side's leg outward (positive roll = toward the right).
+    fn outward(self) -> f32 {
+        match self {
+            Side::Right => 1.0,
+            Side::Left => -1.0,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
 struct Leg {
+    side: Side,
     hip_roll: Joint,
-    hip_pitch: Joint,
-    knee: Joint,
-    ankle_pitch: Joint,
+    knee_upper: Joint,
+    knee_lower: Joint,
     ankle_roll: Joint,
 }
 
 const RIGHT_LEG: Leg = Leg {
+    side: Side::Right,
     hip_roll: Joint::RHipRoll,
-    hip_pitch: Joint::RHipPitch,
-    knee: Joint::RKnee,
-    ankle_pitch: Joint::RAnklePitch,
+    knee_upper: Joint::RKneeUpper,
+    knee_lower: Joint::RKneeLower,
     ankle_roll: Joint::RAnkleRoll,
 };
 
 const LEFT_LEG: Leg = Leg {
+    side: Side::Left,
     hip_roll: Joint::LHipRoll,
-    hip_pitch: Joint::LHipPitch,
-    knee: Joint::LKnee,
-    ankle_pitch: Joint::LAnklePitch,
+    knee_upper: Joint::LKneeUpper,
+    knee_lower: Joint::LKneeLower,
     ankle_roll: Joint::LAnkleRoll,
 };
 
-/// Hip and knee offsets (degrees from neutral) for one leg.
+/// Commands for one leg, in degrees from neutral.
 #[derive(Clone, Copy)]
 struct LegCmd {
-    hip: f32,
-    knee: f32,
+    /// Knee pair swing: positive moves the foot forward.
+    stride: f32,
+    /// Outward hip roll on top of the body lean.
+    lift: f32,
 }
 
-/// Builds a standing-style pose from hip/knee commands. The ankle pitch is derived
-/// (knee - hip) so each foot stays flat on the ground, and the ankle roll mirrors the hip
-/// roll for the same reason.
+/// Builds a standing-style pose from per-leg commands. The two knee servos turn by equal
+/// and opposite amounts so the shin stays parallel to the thigh and the foot stays flat
+/// front to back, and each ankle roll cancels its hip roll so the foot stays flat side to
+/// side.
 fn frame(roll: f32, right: LegCmd, left: LegCmd) -> Pose {
     let mut pose = Pose::neutral();
     for (leg, cmd) in [(RIGHT_LEG, right), (LEFT_LEG, left)] {
+        let hip_roll = roll + leg.side.outward() * cmd.lift;
         pose = pose
-            .with(leg.hip_pitch, cmd.hip)
-            .with(leg.knee, cmd.knee)
-            .with(leg.ankle_pitch, cmd.knee - cmd.hip)
-            .with(leg.hip_roll, roll)
-            .with(leg.ankle_roll, -roll);
+            .with(leg.knee_upper, cmd.stride)
+            .with(leg.knee_lower, -cmd.stride)
+            .with(leg.hip_roll, hip_roll)
+            .with(leg.ankle_roll, -hip_roll);
     }
     pose
 }
 
-fn step_frame(roll: f32, swing: Side, s_hip: f32, s_knee: f32, p_hip: f32) -> Pose {
-    let swing_cmd = LegCmd { hip: s_hip, knee: s_knee };
-    let support_cmd = LegCmd { hip: p_hip, knee: 0.0 };
+fn step_frame(roll: f32, swing: Side, s_stride: f32, s_lift: f32, p_stride: f32) -> Pose {
+    let swing_cmd = LegCmd { stride: s_stride, lift: s_lift };
+    let support_cmd = LegCmd { stride: p_stride, lift: 0.0 };
     match swing {
         Side::Right => frame(roll, swing_cmd, support_cmd),
         Side::Left => frame(roll, support_cmd, swing_cmd),
@@ -164,17 +174,19 @@ fn step_frame(roll: f32, swing: Side, s_hip: f32, s_knee: f32, p_hip: f32) -> Po
 
 /// Standing straight on both feet (legs only; arms are left as they are).
 fn stand_pose() -> Pose {
-    let zero = LegCmd { hip: 0.0, knee: 0.0 };
+    let zero = LegCmd { stride: 0.0, lift: 0.0 };
     frame(0.0, zero, zero)
 }
 
 /// Walks `steps` steps forward, starting with the right foot, then stands still.
 ///
-/// Each step has five phases: lean onto the support foot, lift the swing foot, swing it
-/// forward, plant it while the support leg pushes back, and straighten up.
+/// The legs have no hip or ankle pitch, so this is a shuffle: lean onto the support foot,
+/// tilt the unloaded leg outward to clear the ground, move it forward with the knee pair,
+/// plant it while the support leg's knee pair moves back (which carries the body forward),
+/// and straighten up.
 pub fn walk<H: Hardware>(robot: &mut Robot<H>, steps: u32, g: &Gait) {
     let half = g.stride_deg / 2.0;
-    let mut hip = [0.0f32; 2]; // current hip pitch offset of [right, left]
+    let mut stride = [0.0f32; 2]; // current knee pair offset of [right, left]
 
     robot.move_to(&stand_pose(), 600);
     robot.pause(300);
@@ -182,32 +194,26 @@ pub fn walk<H: Hardware>(robot: &mut Robot<H>, steps: u32, g: &Gait) {
     for n in 0..steps {
         let swing = if n % 2 == 0 { Side::Right } else { Side::Left };
         let support = swing.other();
-        let (s0, p0) = (hip[swing.idx()], hip[support.idx()]);
+        let (s0, p0) = (stride[swing.idx()], stride[support.idx()]);
         let (s1, p1) = (half, -half);
 
-        // Positive roll leans toward the robot's right.
-        let roll = match support {
-            Side::Right => g.lean_deg,
-            Side::Left => -g.lean_deg,
-        };
+        // Lean toward the support side.
+        let roll = support.outward() * g.lean_deg;
 
         // 1. lean over the support foot
         robot.move_to(&step_frame(roll, swing, s0, 0.0, p0), g.phase_ms);
         // 2. lift the swing foot and start moving it forward
         let s_mid = s0 + (s1 - s0) * 0.3;
-        robot.move_to(&step_frame(roll, swing, s_mid, g.knee_bend_deg, p0), g.phase_ms);
-        // 3. swing it fully forward, knee still bent a little
-        robot.move_to(
-            &step_frame(roll, swing, s1, g.knee_bend_deg * 0.6, p0),
-            g.phase_ms,
-        );
-        // 4. plant the foot while the support leg swings back, which moves the body forward
+        robot.move_to(&step_frame(roll, swing, s_mid, g.lift_deg, p0), g.phase_ms);
+        // 3. swing it fully forward, still lifted
+        robot.move_to(&step_frame(roll, swing, s1, g.lift_deg, p0), g.phase_ms);
+        // 4. plant the foot while the support leg moves back, which moves the body forward
         robot.move_to(&step_frame(roll, swing, s1, 0.0, p1), g.phase_ms);
         // 5. straighten up
         robot.move_to(&step_frame(0.0, swing, s1, 0.0, p1), g.phase_ms);
 
-        hip[swing.idx()] = s1;
-        hip[support.idx()] = p1;
+        stride[swing.idx()] = s1;
+        stride[support.idx()] = p1;
     }
 
     robot.move_to(&stand_pose(), 600);
@@ -298,21 +304,30 @@ mod tests {
         let mut r = robot();
         walk(&mut r, 10, &DEFAULT_GAIT);
         let poses = &r.hardware_mut().poses;
-        let lifted = |j: Joint| {
-            // count separate lift events: runs of poses with the knee bent
-            let mut events = 0;
-            let mut up = false;
-            for p in poses {
-                let bent = p.get(j) > NEUTRAL_DEG + 5.0;
-                if bent && !up {
-                    events += 1;
-                }
-                up = bent;
+        // A foot is lifted while the hip rolls are spread apart; the lifted leg is the one
+        // whose knee pair moves forward during that time.
+        let mut lifted = Vec::new();
+        let mut start: Option<&Pose> = None;
+        for w in poses.windows(2) {
+            let spread = |p: &Pose| (p.get(Joint::RHipRoll) - p.get(Joint::LHipRoll)).abs();
+            if spread(&w[1]) > 2.0 && start.is_none() {
+                start = Some(&w[1]);
             }
-            events
-        };
-        assert_eq!(lifted(Joint::RKnee), 5);
-        assert_eq!(lifted(Joint::LKnee), 5);
+            if spread(&w[1]) <= 2.0 {
+                if let Some(s) = start.take() {
+                    let moved = |j: Joint| w[0].get(j) - s.get(j);
+                    let side = if moved(Joint::RKneeUpper) > moved(Joint::LKneeUpper) {
+                        Side::Right
+                    } else {
+                        Side::Left
+                    };
+                    lifted.push(side);
+                }
+            }
+        }
+        let expected: Vec<Side> =
+            (0..10).map(|n| if n % 2 == 0 { Side::Right } else { Side::Left }).collect();
+        assert!(lifted == expected, "lift order was wrong ({} lifts)", lifted.len());
     }
 
     #[test]
@@ -331,10 +346,15 @@ mod tests {
     }
 
     #[test]
-    fn feet_stay_flat_ankle_cancels_leg_angles() {
-        let p = step_frame(0.0, Side::Right, 7.0, 22.0, -7.0);
-        // ankle pitch offset = knee - hip for each leg
-        assert_eq!(p.get(Joint::RAnklePitch), NEUTRAL_DEG + 22.0 - 7.0);
-        assert_eq!(p.get(Joint::LAnklePitch), NEUTRAL_DEG + 0.0 + 7.0);
+    fn feet_stay_flat_knee_pair_and_rolls_cancel() {
+        let p = step_frame(8.0, Side::Right, 15.0, 6.0, -15.0);
+        for leg in [RIGHT_LEG, LEFT_LEG] {
+            let off = |j: Joint| p.get(j) - NEUTRAL_DEG;
+            assert_eq!(off(leg.knee_upper), -off(leg.knee_lower));
+            assert_eq!(off(leg.hip_roll), -off(leg.ankle_roll));
+        }
+        // the swinging right leg is tilted outward (toward the right) by the lift
+        assert_eq!(p.get(Joint::RHipRoll), NEUTRAL_DEG + 8.0 + 6.0);
+        assert_eq!(p.get(Joint::LHipRoll), NEUTRAL_DEG + 8.0);
     }
 }

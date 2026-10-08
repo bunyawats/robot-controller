@@ -17,55 +17,64 @@ pub const PCA_STEPS: f32 = 4096.0;
 pub const MIN_PULSE_US: f32 = 500.0;
 pub const MAX_PULSE_US: f32 = 2400.0;
 
-/// The 16 joints. The order here MUST match the order of `CALIBRATION` below.
+/// The 16 joints, in PCA9685 channel order. The order here MUST match `CALIBRATION` below.
 ///
-/// Layout assumed for the 16-servo biped: 3 per arm (two shoulder joints plus a claw),
-/// 5 per leg. This is a guess from a photo: run the self-test on first boot, watch which
-/// servo moves, and rename or reorder entries here to match the real robot.
+/// Layout from the kit manual's "servo number Schematic" (see `Robot Schema.jpg`): 4 servos
+/// per arm and 4 per leg. The manual numbers them for a 32-channel controller, S1-S8 on one
+/// side and S25-S32 on the other; here S1-S8 go on channels 0-7 and S25-S32 on channels
+/// 8-15. The drawing is assumed to be a front view, so S1-S8 are the robot's right side.
+/// The self-test confirms this: if a "right" joint moves on the left, swap the two blocks
+/// of plugs.
+///
+/// Each leg has a hip roll, two stacked pitch servos at the knee and an ankle roll. There is
+/// no hip pitch or ankle pitch, so the foot only stays flat when the two knee servos turn by
+/// equal and opposite amounts.
+///
 /// Sign convention (flip a joint with `invert` in `CALIBRATION` if it moves the wrong way):
-///   - gripper: positive = claw opens
+///   - gripper:        positive = claw opens
+///   - elbow:          positive = forearm bends inward
 ///   - shoulder pitch: positive = arm swings forward/up
-///   - hip pitch:      positive = thigh swings forward
-///   - knee:           positive = knee bends (foot goes backward)
-///   - ankle pitch:    positive = toes up
+///   - shoulder roll:  positive = arm swings out sideways
+///   - knee upper:     positive = everything below it swings forward
+///   - knee lower:     positive = shin swings forward
 ///   - hip/ankle roll: positive = lean toward the robot's right
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Joint {
-    RShoulderPitch,
-    RShoulderRoll,
-    RGripper,
-    LShoulderPitch,
-    LShoulderRoll,
-    LGripper,
-    RHipRoll,
-    RHipPitch,
-    RKnee,
-    RAnklePitch,
-    RAnkleRoll,
-    LHipRoll,
-    LHipPitch,
-    LKnee,
-    LAnklePitch,
-    LAnkleRoll,
+    RAnkleRoll,     // S1
+    RKneeLower,     // S2
+    RKneeUpper,     // S3
+    RHipRoll,       // S4
+    RShoulderPitch, // S5
+    RShoulderRoll,  // S6
+    RElbow,         // S7
+    RGripper,       // S8
+    LGripper,       // S25
+    LElbow,         // S26
+    LShoulderRoll,  // S27
+    LShoulderPitch, // S28
+    LHipRoll,       // S29
+    LKneeUpper,     // S30
+    LKneeLower,     // S31
+    LAnkleRoll,     // S32
 }
 
 impl Joint {
     pub const ALL: [Joint; NUM_JOINTS] = [
+        Joint::RAnkleRoll,
+        Joint::RKneeLower,
+        Joint::RKneeUpper,
+        Joint::RHipRoll,
         Joint::RShoulderPitch,
         Joint::RShoulderRoll,
+        Joint::RElbow,
         Joint::RGripper,
-        Joint::LShoulderPitch,
-        Joint::LShoulderRoll,
         Joint::LGripper,
-        Joint::RHipRoll,
-        Joint::RHipPitch,
-        Joint::RKnee,
-        Joint::RAnklePitch,
-        Joint::RAnkleRoll,
+        Joint::LElbow,
+        Joint::LShoulderRoll,
+        Joint::LShoulderPitch,
         Joint::LHipRoll,
-        Joint::LHipPitch,
-        Joint::LKnee,
-        Joint::LAnklePitch,
+        Joint::LKneeUpper,
+        Joint::LKneeLower,
         Joint::LAnkleRoll,
     ];
 
@@ -101,26 +110,26 @@ const fn c(channel: u8, min_deg: f32, max_deg: f32) -> Calib {
 
 /// EDIT THIS TABLE FOR YOUR ROBOT.
 ///
-/// The channel numbers are a placeholder (joint order = channel order). Change them to
-/// match where each servo is really plugged in. The limits are deliberately conservative;
-/// widen them only after checking the joint can move that far without binding.
+/// Channels follow the manual's numbering (S1-S8 on 0-7, S25-S32 on 8-15). Change them if a
+/// servo is plugged in elsewhere. The limits are deliberately conservative; widen them only
+/// after checking the joint can move that far without binding.
 pub const CALIBRATION: [Calib; NUM_JOINTS] = [
-    c(0, 10.0, 170.0),  // RShoulderPitch
-    c(1, 20.0, 160.0),  // RShoulderRoll
-    c(2, 20.0, 160.0),  // RGripper
-    c(3, 10.0, 170.0),  // LShoulderPitch
-    c(4, 20.0, 160.0),  // LShoulderRoll
-    c(5, 20.0, 160.0),  // LGripper
-    c(6, 50.0, 130.0),  // RHipRoll
-    c(7, 40.0, 140.0),  // RHipPitch
-    c(8, 40.0, 140.0),  // RKnee
-    c(9, 40.0, 140.0),  // RAnklePitch
-    c(10, 50.0, 130.0), // RAnkleRoll
-    c(11, 50.0, 130.0), // LHipRoll
-    c(12, 40.0, 140.0), // LHipPitch
-    c(13, 40.0, 140.0), // LKnee
-    c(14, 40.0, 140.0), // LAnklePitch
-    c(15, 50.0, 130.0), // LAnkleRoll
+    c(0, 50.0, 130.0),  // RAnkleRoll     S1
+    c(1, 40.0, 140.0),  // RKneeLower     S2
+    c(2, 40.0, 140.0),  // RKneeUpper     S3
+    c(3, 50.0, 130.0),  // RHipRoll       S4
+    c(4, 10.0, 170.0),  // RShoulderPitch S5
+    c(5, 20.0, 160.0),  // RShoulderRoll  S6
+    c(6, 20.0, 160.0),  // RElbow         S7
+    c(7, 20.0, 160.0),  // RGripper       S8
+    c(8, 20.0, 160.0),  // LGripper       S25
+    c(9, 20.0, 160.0),  // LElbow         S26
+    c(10, 20.0, 160.0), // LShoulderRoll  S27
+    c(11, 10.0, 170.0), // LShoulderPitch S28
+    c(12, 50.0, 130.0), // LHipRoll       S29
+    c(13, 40.0, 140.0), // LKneeUpper     S30
+    c(14, 40.0, 140.0), // LKneeLower     S31
+    c(15, 50.0, 130.0), // LAnkleRoll     S32
 ];
 
 /// Converts one logical angle to PCA9685 "off" ticks (0-4095) for a joint.

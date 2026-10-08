@@ -6,7 +6,8 @@ walk. There is no networking and no remote control.
 
 ## Hardware
 
-Photos: [the robot](16%20DOF%20Robot.jpg) (3 servos per arm, 5 per leg),
+Photos: [the robot](16%20DOF%20Robot.jpg) (4 servos per arm, 4 per leg),
+[the kit manual's servo numbering](Robot%20Schema.jpg),
 [the ESP32-S3 on its extension board](ESP32-Extension%20Board.jpg) and
 [the PCA9685 board](PCA9685.jpg).
 
@@ -44,7 +45,19 @@ The PCA9685 is the common 16-channel servo board. Its address pads A0-A5 are all
 - Join the grounds of the servo supply, the PCA9685 and the ESP32-S3.
 - The PCA9685 board already has a large capacitor on the servo supply. If it is under
   1000 uF, add a 1000 uF one across the screw terminal to prevent brownout resets.
-- Plug each servo into a channel column: yellow = signal, red = V+, black = GND. With
+- Plug the servos in by the manual's numbers (see [the schematic](Robot%20Schema.jpg)):
+  S1-S8 on channels 0-7 and S25-S32 on channels 8-15.
+
+  | Channel | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+  |---|---|---|---|---|---|---|---|---|
+  | Servo | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 |
+  | Joint (right) | ankle roll | knee lower | knee upper | hip roll | shoulder pitch | shoulder roll | elbow | gripper |
+
+  | Channel | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+  |---|---|---|---|---|---|---|---|---|
+  | Servo | S25 | S26 | S27 | S28 | S29 | S30 | S31 | S32 |
+  | Joint (left) | gripper | elbow | shoulder roll | shoulder pitch | hip roll | knee upper | knee lower | ankle roll |
+- Each channel column: yellow = signal, red = V+, black = GND. With
   orange / red / brown servo leads, orange goes on yellow and brown on black. Channels run
   0-15 from left to right, in four groups of four.
 - Don't use GPIO35, 36 or 37 for anything you add later: on N16R8 modules the octal PSRAM
@@ -52,7 +65,8 @@ The PCA9685 is the common 16-channel servo board. Its address pads A0-A5 are all
 
 ## First run (do this before anything else)
 
-The joint names and channel numbers in `src/servo.rs` are a **guess**. Fix them first:
+The joint names and channels in `src/servo.rs` come from the kit manual, but which side is
+"right" and which way each servo turns are a **guess**. Check them first:
 
 1. Hang the robot or lay it on its back so no joint can drive into the table.
 2. Flash with `DEMO = Demo::SelfTest` (the default in `src/main.rs`).
@@ -111,11 +125,13 @@ the ESP32-S3 target.
 `DEFAULT_GAIT` in `src/moves.rs`:
 
 - `lean_deg`: sideways lean over the support foot while the other foot is lifted
-- `stride_deg`: total hip swing front to back
-- `knee_bend_deg`: how high the swinging foot is lifted
+- `stride_deg`: total knee-pair swing front to back. The two knee servos turn by equal and
+  opposite amounts so the foot stays flat, which moves the foot forward or back.
+- `lift_deg`: extra outward hip roll on the swinging leg so its foot clears the ground
 - `phase_ms`: time for each of the five phases of a step
 
-Start small, raise one value at a time, and keep a hand near the robot. The walk is a
+The legs have no hip or ankle pitch, so the walk is a sideways-lean shuffle rather than a
+real stride. Start small, raise one value at a time, and keep a hand near the robot. The walk is a
 simple open-loop gait with no balance feedback, so it will need tuning on the real robot
 before it walks reliably; it is a starting point, not a finished gait.
 
