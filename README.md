@@ -7,7 +7,7 @@ walk. There is no networking and no remote control.
 ## Hardware
 
 Photos: [the robot](16%20DOF%20Robot.jpg) (4 servos per arm, 4 per leg),
-[the kit manual's servo numbering](Robot%20Schema.jpg),
+[the kit manual's servo numbering](Robot%20Schema.png),
 [the ESP32-S3 on its extension board](ESP32-Extension%20Board.jpg) and
 [the PCA9685 board](PCA9685.jpg).
 
@@ -45,7 +45,7 @@ The PCA9685 is the common 16-channel servo board. Its address pads A0-A5 are all
 - Join the grounds of the servo supply, the PCA9685 and the ESP32-S3.
 - The PCA9685 board already has a large capacitor on the servo supply. If it is under
   1000 uF, add a 1000 uF one across the screw terminal to prevent brownout resets.
-- Plug the servos in by the manual's numbers (see [the schematic](Robot%20Schema.jpg)):
+- Plug the servos in by the manual's numbers (see [the schematic](Robot%20Schema.png)):
   S1-S8 on channels 0-7 and S25-S32 on channels 8-15.
 
   | Channel | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |

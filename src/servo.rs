@@ -19,7 +19,7 @@ pub const MAX_PULSE_US: f32 = 2400.0;
 
 /// The 16 joints, in PCA9685 channel order. The order here MUST match `CALIBRATION` below.
 ///
-/// Layout from the kit manual's "servo number Schematic" (see `Robot Schema.jpg`): 4 servos
+/// Layout from the kit manual's "servo number Schematic" (see `Robot Schema.png`): 4 servos
 /// per arm and 4 per leg. The manual numbers them for a 32-channel controller, S1-S8 on one
 /// side and S25-S32 on the other; here S1-S8 go on channels 0-7 and S25-S32 on channels
 /// 8-15. The drawing is assumed to be a front view, so S1-S8 are the robot's right side.
