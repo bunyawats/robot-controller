@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex when working with code in this repository.
 
 ESP32-S3 firmware (Rust, `esp-idf-svc` std stack) for a 16-servo biped driven through a PCA9685 over I2C (SDA GPIO8, SCL GPIO9, addr 0x40). Moves are hardcoded and run once at boot; no networking. Not yet run on real hardware. See README.md for wiring, power, and the first-run calibration procedure.
 
