@@ -6,8 +6,9 @@ walk. There is no networking and no remote control.
 
 ## Hardware
 
-Photos: [the robot](16%20DOF%20Robot.jpg) (3 servos per arm, 5 per leg) and
-[the ESP32-S3 on its extension board](ESP32-Extension%20Board.jpg).
+Photos: [the robot](16%20DOF%20Robot.jpg) (3 servos per arm, 5 per leg),
+[the ESP32-S3 on its extension board](ESP32-Extension%20Board.jpg) and
+[the PCA9685 board](PCA9685.jpg).
 
 The board is an ESP32-S3-N16R8 module (16 MB flash, 8 MB octal PSRAM) on a DevKitC-style
 board with two USB-C ports, plugged into an "ESP32 Extension Board" (DC 6.5-9 V barrel jack,
@@ -15,13 +16,24 @@ board with two USB-C ports, plugged into an "ESP32 Extension Board" (DC 6.5-9 V 
 USB-C port wired to the onboard WCH USB-serial chip; on this Mac it shows up as
 `/dev/cu.usbmodem5CF70246821`.
 
-| PCA9685 | Extension board |
+The PCA9685 is the common 16-channel servo board. Its address pads A0-A5 are all open
+(factory default), which gives address 0x40, the one the firmware uses.
+
+| PCA9685 | Connect to |
 |---|---|
-| VCC | 3.3V pin (middle red pin of any GPIO row) |
-| GND | GND pin of any GPIO row |
-| SDA | S pin of the IO8 row (GPIO8) |
-| SCL | S pin of the IO9 row (GPIO9) |
-| V+ | separate 5 V servo supply |
+| Left header `VCC` | 3.3V pin on the extension board (middle red pin of any GPIO row) |
+| Left header `GND` | GND pin of any GPIO row |
+| Left header `SDA` | S pin of the IO8 row (GPIO8) |
+| Left header `SCL` | S pin of the IO9 row (GPIO9) |
+| Left header `OE` | nothing (pulled low on the board, so the outputs stay on) |
+| Left header `V+` | nothing |
+| Green screw terminal `+` / `GND` | separate 5 V servo supply |
+
+- Feed servo power through the green screw terminal, not the `V+` header pin: on this board
+  design the terminal usually goes through a reverse-polarity protection part, and the
+  header pin bypasses it. Check the `+` / `GND` markings before tightening.
+- The unpopulated pins on the right edge duplicate the left header for chaining a second
+  board. Leave them empty.
 
 - Use **3V3** for `VCC`, not 5 V: the PCA9685 board's I2C pull-ups follow `VCC`, and 5 V
   on the ESP32-S3's GPIOs can damage it.
@@ -30,9 +42,11 @@ USB-C port wired to the onboard WCH USB-serial chip; on this Mac it shows up as
   the extension board's 5V header either, even when it is fed from the DC jack: its small
   onboard regulator is unlikely to handle that peak, and the dips will reset the ESP32-S3.
 - Join the grounds of the servo supply, the PCA9685 and the ESP32-S3.
-- Add a 1000 uF capacitor across the servo supply near the PCA9685 to prevent brownout resets.
-- Plug each servo's 3-pin lead into a PCA9685 channel header (signal, V+, GND order as
-  printed on the board).
+- The PCA9685 board already has a large capacitor on the servo supply. If it is under
+  1000 uF, add a 1000 uF one across the screw terminal to prevent brownout resets.
+- Plug each servo into a channel column: yellow = signal, red = V+, black = GND. With
+  orange / red / brown servo leads, orange goes on yellow and brown on black. Channels run
+  0-15 from left to right, in four groups of four.
 - Don't use GPIO35, 36 or 37 for anything you add later: on N16R8 modules the octal PSRAM
   uses them internally, even though the extension board breaks them out to headers.
 
