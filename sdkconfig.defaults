@@ -1,0 +1,5 @@
+# Larger main task stack: the default is too small for Rust std programs.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
+
+# Keep the FreeRTOS tick at 1 kHz so FreeRtos::delay_ms is accurate to 1 ms.
+CONFIG_FREERTOS_HZ=1000
