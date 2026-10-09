@@ -17,6 +17,9 @@ board with two USB-C ports, plugged into an "ESP32 Extension Board" (DC 6.5-9 V 
 USB-C port wired to the onboard WCH USB-serial chip; on this Mac it shows up as
 `/dev/cu.usbmodem5CF70246821`.
 
+[WIRING.md](WIRING.md) has the full ESP32-S3 to PCA9685 wiring guide with a diagram and a
+pre-power-on checklist.
+
 The PCA9685 is the common 16-channel servo board. Its address pads A0-A5 are all open
 (factory default), which gives address 0x40, the one the firmware uses.
 
