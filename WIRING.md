@@ -6,7 +6,8 @@ PCA9685 drives the 16 servos, which run from their own 5 V supply.
 ![Wiring diagram](Wiring%20Diagram.png)
 
 Only the PCA9685's logic runs from the ESP32-S3's 3.3 V. Servo current never passes through
-the ESP32-S3 or the extension board.
+the ESP32-S3 or the extension board. Servo power enters through the PCA9685's `V+` header
+pin, because the screw terminal on this board does not pass power through (see Servo power).
 
 ## Pin mapping
 
@@ -20,23 +21,44 @@ extension board has three pins: **S** (signal), **3.3V** (middle, red) and **GND
 | `SDA` | S pin of the IO8 row (GPIO8) | I2C data |
 | `SCL` | S pin of the IO9 row (GPIO9) | I2C clock |
 | `OE` | Not connected | Pulled low on the board, so outputs stay enabled |
-| `V+` | Not connected | Servo power goes through the screw terminal instead |
+| `V+` | Not connected to the ESP32-S3 | Servo 5 V input (see Servo power) |
 
 ## Servo power
 
-The servos get their own 5 V supply rated 3 A or more, connected to the PCA9685's green
-screw terminal.
+The servos get their own 5 V supply rated 3 A or more, connected to the **left-header `V+`
+and `GND` pins**, not the green screw terminal.
 
-- Use the screw terminal (`+` / `GND`), not the `V+` header pin. On this board design the
-  terminal usually goes through a reverse-polarity protection part, and the header pin
-  bypasses it. Check the markings before tightening.
-- 16 SG90/MG90S servos moving together draw about 3-4 A at peak. Never power them from the
-  ESP32-S3, its USB port, or the extension board's 5V header: the dips will reset the
-  ESP32-S3.
-- Connect the grounds of the servo supply, the PCA9685 and the ESP32-S3. The GND wire in the
-  pin mapping already joins the PCA9685 and the ESP32-S3.
-- If the PCA9685's onboard capacitor is under 1000 uF, add a 1000 uF one across the screw
-  terminal to prevent brownout resets.
+On this board the terminal's `+` goes through a reverse-polarity protection transistor before
+it reaches the servo rail, and that transistor does not conduct: the terminal reads 5 V with
+correct polarity while the channel red/black pins read under 1 V. The header `V+` pin joins
+the rail after the transistor, so it works.
+
+```
+terminal +  --> [protection transistor, not conducting] --> V+ rail --> red pin of every channel
+                                                              ^
+left-header V+ pin -------------------------------------------+
+```
+
+| Supply wire | PCA9685 pin |
+|---|---|
+| `+` 5 V | Left-header `V+` (bottom pin, below `VCC`) |
+| `-` GND | Terminal `GND` screw (right screw) or left-header `GND` |
+
+- **No reverse-polarity protection on this path.** Reversed power goes straight to the
+  servos. Use red for `V+` and black for `GND`, ideally in a keyed connector, and check the
+  polarity before switching on.
+- **Don't put 5 V on `VCC`.** It is the pin right above `V+` and must stay on 3.3 V.
+- The terminal `GND` screw, the header `GND` pin and every channel's black pin are the same
+  ground; only the `+` side is broken. Keep the header `GND` wire to the extension board
+  either way, so I2C and the servo supply share a ground.
+- 16 SG90/MG90S servos moving together draw about 3-4 A at peak. That is too much for a
+  single thin Dupont jumper on `V+`: use a thicker wire soldered to the pin, or bridge the
+  protection transistor so the terminal works again (that path is unprotected too).
+- Never power more than one or two servos from the ESP32-S3, its USB port, or the extension
+  board's 5V header: the dips will reset the ESP32-S3. One servo on the extension board's
+  5V pin is fine for bench tests.
+- If the PCA9685's onboard capacitor is under 1000 uF, add a 1000 uF one across `V+` and
+  `GND` to prevent brownout resets.
 
 ## Servo channels
 
@@ -72,7 +94,8 @@ servo leads, orange goes on yellow and brown on black.
   5 V would put 5 V on GPIO8/9 and could damage the ESP32-S3.
 - [ ] Address pads A0-A5 are all open (address 0x40).
 - [ ] The pins on the PCA9685's right edge are empty. They only chain a second board.
-- [ ] Servo supply polarity matches the `+` / `GND` marks on the screw terminal.
+- [ ] Servo supply `+` goes to header `V+`, not `VCC`, and its `-` to `GND`.
+- [ ] Channel 0's red/black pins read about 5 V with the supply on.
 - [ ] The PCA9685's POWER LED is lit.
 
 Don't use GPIO35, 36 or 37 for anything added later: the N16R8 module's octal PSRAM uses

@@ -30,12 +30,13 @@ The PCA9685 is the common 16-channel servo board. Its address pads A0-A5 are all
 | Left header `SDA` | S pin of the IO8 row (GPIO8) |
 | Left header `SCL` | S pin of the IO9 row (GPIO9) |
 | Left header `OE` | nothing (pulled low on the board, so the outputs stay on) |
-| Left header `V+` | nothing |
-| Green screw terminal `+` / `GND` | separate 5 V servo supply |
+| Left header `V+` | `+` of a separate 5 V servo supply |
+| Green screw terminal `GND` (or left header `GND`) | `-` of the servo supply |
 
-- Feed servo power through the green screw terminal, not the `V+` header pin: on this board
-  design the terminal usually goes through a reverse-polarity protection part, and the
-  header pin bypasses it. Check the `+` / `GND` markings before tightening.
+- Feed servo power into the `V+` header pin, not the green screw terminal: on this board the
+  terminal's reverse-polarity protection transistor does not conduct, so no power reaches
+  the servos from it. The header path has no reverse-polarity protection, so check the
+  polarity before switching on. See [WIRING.md](WIRING.md#servo-power) for details.
 - The unpopulated pins on the right edge duplicate the left header for chaining a second
   board. Leave them empty.
 
@@ -47,7 +48,7 @@ The PCA9685 is the common 16-channel servo board. Its address pads A0-A5 are all
   onboard regulator is unlikely to handle that peak, and the dips will reset the ESP32-S3.
 - Join the grounds of the servo supply, the PCA9685 and the ESP32-S3.
 - The PCA9685 board already has a large capacitor on the servo supply. If it is under
-  1000 uF, add a 1000 uF one across the screw terminal to prevent brownout resets.
+  1000 uF, add a 1000 uF one across `V+` and `GND` to prevent brownout resets.
 - Plug the servos in by the manual's numbers (see [the schematic](Robot%20Schema.png)):
   S1-S8 on channels 0-7 and S25-S32 on channels 8-15.
 
