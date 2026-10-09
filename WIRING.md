@@ -66,24 +66,24 @@ Servos plug in by the kit manual's numbers (see [the schematic](Robot%20Schema.p
 on channels 0-7 and S25-S32 on channels 8-15. Which side is right is still a guess until the
 self-test confirms it.
 
-| Channel | Servo | Joint |
-|---|---|---|
-| 0 | S1 | Right ankle roll |
-| 1 | S2 | Right knee lower |
-| 2 | S3 | Right knee upper |
-| 3 | S4 | Right hip roll |
-| 4 | S5 | Right shoulder pitch |
-| 5 | S6 | Right shoulder roll |
-| 6 | S7 | Right elbow |
-| 7 | S8 | Right gripper |
-| 8 | S25 | Left gripper |
-| 9 | S26 | Left elbow |
-| 10 | S27 | Left shoulder roll |
-| 11 | S28 | Left shoulder pitch |
-| 12 | S29 | Left hip roll |
-| 13 | S30 | Left knee upper |
-| 14 | S31 | Left knee lower |
-| 15 | S32 | Left ankle roll |
+| Channel | Servo | Joint | ข้อต่อ |
+|---|---|---|---|
+| 0 | S1 | Right ankle roll | ข้อเท้าขวา (เอียงข้าง) |
+| 1 | S2 | Right knee lower | เข่าขวา ตัวล่าง |
+| 2 | S3 | Right knee upper | เข่าขวา ตัวบน |
+| 3 | S4 | Right hip roll | สะโพกขวา (เอียงข้าง) |
+| 4 | S5 | Right shoulder pitch | ไหล่ขวา (แกว่งหน้า-หลัง) |
+| 5 | S6 | Right shoulder roll | ไหล่ขวา (กาง-หุบแขน) |
+| 6 | S7 | Right elbow | ข้อศอกขวา |
+| 7 | S8 | Right gripper | มือจับขวา |
+| 8 | S25 | Left gripper | มือจับซ้าย |
+| 9 | S26 | Left elbow | ข้อศอกซ้าย |
+| 10 | S27 | Left shoulder roll | ไหล่ซ้าย (กาง-หุบแขน) |
+| 11 | S28 | Left shoulder pitch | ไหล่ซ้าย (แกว่งหน้า-หลัง) |
+| 12 | S29 | Left hip roll | สะโพกซ้าย (เอียงข้าง) |
+| 13 | S30 | Left knee upper | เข่าซ้าย ตัวบน |
+| 14 | S31 | Left knee lower | เข่าซ้าย ตัวล่าง |
+| 15 | S32 | Left ankle roll | ข้อเท้าซ้าย (เอียงข้าง) |
 
 On each channel column, yellow = signal, red = V+ and black = GND. With orange / red / brown
 servo leads, orange goes on yellow and brown on black.
