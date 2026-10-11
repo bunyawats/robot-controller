@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-ESP32-S3 firmware (Rust, `esp-idf-svc` std stack) for a 16-servo biped driven through a PCA9685 over I2C (SDA GPIO8, SCL GPIO9, addr 0x40). Moves are hardcoded and run once at boot; no networking. Not yet run on real hardware. See README.md for wiring, power, and the first-run calibration procedure.
+ESP32-S3 firmware (Rust, `esp-idf-svc` std stack) for a 16-servo biped driven through a PCA9685 over I2C (SDA GPIO8, SCL GPIO9, addr 0x40). Moves are hardcoded and run once at boot; no networking. Hardware bring-up is in progress: both shoulder pitch joints are verified and `Demo::Arms` runs. See README.md for wiring, power, and the first-run calibration procedure.
 
 ## Build and flash
 
@@ -42,4 +42,4 @@ Layered so everything except `main.rs` is pure logic with no ESP dependencies:
 - **`moves.rs`** — self-test, arm up/down, and an open-loop 5-phase walk parameterized by `Gait` (`DEFAULT_GAIT`). Each leg is hip roll, two stacked knee pitch servos and ankle roll (no hip or ankle pitch), so the walk is a lean-and-shuffle gait. `frame()` keeps the feet flat by turning the knee pair by equal and opposite amounts (`lower = -upper`) and setting ankle roll to `-hip roll`. A test asserts the default walk stays within every joint's calibrated limits — keep it passing when tuning the gait or calibration.
 - **`main.rs`** — ESP glue only: implements `Transport` (`I2cBus`) and `Hardware` (`Servos`, which calls `servo::pose_to_ticks` with `CALIBRATION`), boot countdown, then runs the demo chosen by the `DEMO` const. `RELEASE_AT_END` controls whether servos go limp afterwards.
 
-The joint layout follows the kit manual's servo numbering (`Robot Schema.png`: S1–S8 → channels 0–7, S25–S32 → 8–15, and the `Joint` enum is in channel order). Which side is right, the turning directions and trims are still unverified pending the hardware self-test; `DEMO` defaults to `Demo::SelfTest` for that reason.
+The joint layout follows the kit manual's servo numbering (`Robot Schema.png`: S1–S8 → channels 0–7, S25–S32 → 8–15, and the `Joint` enum is in channel order). Turning directions are verified only for `RShoulderPitch` and `LShoulderPitch` (the left one is inverted); all trims and the other joints are still unchecked, so `DEMO` defaults to `Demo::SelfTest`. `Demo::OneJoint(joint)` swings a single joint +30 degrees and back three times, for checking servos one by one. At boot the firmware logs an I2C scan (expect `found 0x40`).

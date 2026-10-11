@@ -77,6 +77,8 @@ The joint names and channels in `src/servo.rs` come from the kit manual, but whi
 3. After a 5 second countdown every joint snaps to neutral, then each one moves +15 degrees
    and back, one at a time. The log prints the joint name before each move.
 4. Write down which physical servo moved for each name, and which way it went.
+   To check one servo at a time, set `DEMO = Demo::OneJoint(Joint::...)` instead: after the
+   countdown that joint swings +30 degrees (its positive direction) and back three times.
 5. Edit `CALIBRATION` (and the `Joint` enum order or names if needed) in `src/servo.rs`:
    - `channel`: the PCA9685 channel that servo is really plugged into
    - `invert`: set `true` if the joint moved the wrong way (positive angles are documented

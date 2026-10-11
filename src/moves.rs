@@ -27,6 +27,23 @@ pub fn self_test<H: Hardware>(robot: &mut Robot<H>, mut on_joint: impl FnMut(Joi
     }
 }
 
+/// How far `joint_test` swings the joint. Fits inside every joint's calibrated limits.
+const JOINT_TEST_DEG: f32 = 30.0;
+
+/// Swings one joint in its positive direction by 30 degrees and back, `times` times, with a
+/// hold at each end. Positive only, so the first movement shows which way "positive" turns
+/// (compare with the sign convention on `Joint`; flip `invert` if it is wrong).
+pub fn joint_test<H: Hardware>(robot: &mut Robot<H>, joint: Joint, times: u32) {
+    let home = *robot.current();
+    let out = home.add(joint, JOINT_TEST_DEG);
+    for _ in 0..times {
+        robot.move_to(&out, 600);
+        robot.pause(700);
+        robot.move_to(&home, 600);
+        robot.pause(700);
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // Arms
 // ---------------------------------------------------------------------------------------
@@ -245,6 +262,35 @@ mod tests {
         for pose in &r.hardware_mut().poses {
             let moved = (0..16).filter(|i| (pose.0[*i] - NEUTRAL_DEG).abs() > 1e-3).count();
             assert!(moved <= 1, "more than one joint away from neutral: {moved}");
+        }
+    }
+
+    #[test]
+    fn joint_test_moves_only_that_joint_positive_and_returns_home() {
+        let mut r = robot();
+        joint_test(&mut r, Joint::RElbow, 3);
+        let poses = &r.hardware_mut().poses;
+        for pose in poses {
+            for j in Joint::ALL.iter().filter(|j| **j != Joint::RElbow) {
+                assert_eq!(pose.get(*j), NEUTRAL_DEG, "{j:?} moved");
+            }
+            assert!(pose.get(Joint::RElbow) >= NEUTRAL_DEG);
+        }
+        let tops = poses
+            .windows(2)
+            .filter(|w| {
+                w[0].get(Joint::RElbow) < NEUTRAL_DEG + JOINT_TEST_DEG
+                    && (w[1].get(Joint::RElbow) - (NEUTRAL_DEG + JOINT_TEST_DEG)).abs() < 1e-3
+            })
+            .count();
+        assert_eq!(tops, 3);
+        assert_eq!(*r.current(), Pose::neutral());
+    }
+
+    #[test]
+    fn joint_test_swing_fits_every_joints_limits() {
+        for cal in CALIBRATION.iter() {
+            assert!(NEUTRAL_DEG + JOINT_TEST_DEG <= cal.max_deg, "channel {}", cal.channel);
         }
     }
 
