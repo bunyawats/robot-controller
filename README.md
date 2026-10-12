@@ -87,7 +87,7 @@ The PCA9685 is the common 16-channel servo board. Its address pads A0-A5 are all
 
 ## First run (do this before anything else)
 
-The joint names and channels in `src/servo.rs` come from the kit manual, but which side is
+The joint names and channels in `src/robot_16_dof/servo.rs` come from the kit manual, but which side is
 "right" and which way each servo turns are a **guess**. Check them first:
 
 1. Hang the robot or lay it on its back so no joint can drive into the table.
@@ -98,7 +98,7 @@ The joint names and channels in `src/servo.rs` come from the kit manual, but whi
    To check servos one at a time, set `DEMO = Demo::Joints(&[Joint::...])` instead: after the
    countdown each listed joint in turn swings +30 degrees (its positive direction) and back
    three times.
-5. Edit `CALIBRATION` (and the `Joint` enum order or names if needed) in `src/servo.rs`:
+5. Edit `CALIBRATION` (and the `Joint` enum order or names if needed) in `src/robot_16_dof/servo.rs`:
    - `channel`: the PCA9685 channel that servo is really plugged into
    - `invert`: set `true` if the joint moved the wrong way (positive angles are documented
      on the `Joint` enum)
@@ -134,20 +134,24 @@ set `RELEASE_AT_END` in `src/main.rs` to cut servo power instead (the robot then
 
 | File | What it does | Hardware needed to test |
 |---|---|---|
-| `src/servo.rs` | Joint list, calibration table, angle to PWM tick conversion | none |
-| `src/pca9685.rs` | Minimal PCA9685 driver over a small `Transport` trait | none |
-| `src/motion.rs` | Poses, smooth interpolation between them | none |
-| `src/moves.rs` | Self-test, arm up/down, walk | none |
-| `src/main.rs` | ESP32-S3 wiring (I2C, status LED, boot countdown, demo selection) | ESP32-S3 |
+| `src/robot_16_dof/servo.rs` | Joint list, calibration table, angle to PWM tick conversion | none |
+| `src/robot_16_dof/pca9685.rs` | Minimal PCA9685 driver over a small `Transport` trait | none |
+| `src/robot_16_dof/motion.rs` | Poses, smooth interpolation between them | none |
+| `src/robot_16_dof/moves.rs` | Self-test, joint test, arm up/down, walk | none |
+| `src/robot_16_dof/esp32.rs` | PCA9685 over the ESP32-S3's I2C, the real servo `Hardware` | ESP32-S3 |
+| `src/rgb_led/color.rs` | RGB colours and the rainbow fade | none |
+| `src/rgb_led/ws2812.rs` | WS2812 LED driver over the ESP32-S3's RMT peripheral | ESP32-S3 |
+| `src/main.rs` | Demo selection, status-light colours, boot countdown | ESP32-S3 |
 
-The first four modules have no ESP dependencies and carry unit tests. To run them on a PC,
-include them from a small test crate with `#[path = "..."] mod servo;` and so on, then
-`rustc --test`. They are not run by `cargo test` here because the project builds only for
-the ESP32-S3 target.
+The modules marked "none" have no ESP dependencies and carry unit tests. To run them on a PC,
+include `src/robot_16_dof/mod.rs` and `src/rgb_led/mod.rs` from a small test crate with
+`#[path = "..."] mod robot_16_dof;` and `mod rgb_led;`, then `rustc --test` (the ESP-only
+files are skipped off-target). They are not run by `cargo test` here because the project
+builds only for the ESP32-S3 target.
 
 ## Tuning the walk
 
-`DEFAULT_GAIT` in `src/moves.rs`:
+`DEFAULT_GAIT` in `src/robot_16_dof/moves.rs`:
 
 - `lean_deg`: sideways lean over the support foot while the other foot is lifted
 - `stride_deg`: total knee-pair swing front to back. The two knee servos turn by equal and

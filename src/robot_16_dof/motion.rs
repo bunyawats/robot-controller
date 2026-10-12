@@ -3,7 +3,7 @@
 //! Hardware-independent: all output goes through the `Hardware` trait, so the moves can
 //! be run against a mock on a PC.
 
-use crate::servo::{Joint, NEUTRAL_DEG, NUM_JOINTS};
+use crate::robot_16_dof::servo::{Joint, NEUTRAL_DEG, NUM_JOINTS};
 
 /// Time between servo updates while moving.
 pub const STEP_MS: u32 = 20;

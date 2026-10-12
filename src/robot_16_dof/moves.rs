@@ -3,8 +3,8 @@
 //! These are starting points. Servo directions, trims and the gait numbers below all need
 //! tuning on the real robot. Do the self-test and fix `CALIBRATION` first.
 
-use crate::motion::{Hardware, Pose, Robot};
-use crate::servo::Joint;
+use crate::robot_16_dof::motion::{Hardware, Pose, Robot};
+use crate::robot_16_dof::servo::Joint;
 
 // ---------------------------------------------------------------------------------------
 // Self-test
@@ -240,8 +240,8 @@ pub fn walk<H: Hardware>(robot: &mut Robot<H>, steps: u32, g: &Gait) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::motion::test_support::MockHw;
-    use crate::servo::{CALIBRATION, NEUTRAL_DEG};
+    use crate::robot_16_dof::motion::test_support::MockHw;
+    use crate::robot_16_dof::servo::{CALIBRATION, NEUTRAL_DEG};
 
     fn robot() -> Robot<MockHw> {
         Robot::new(MockHw::default())
