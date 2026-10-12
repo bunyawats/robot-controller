@@ -27,22 +27,80 @@ pub fn self_test<H: Hardware>(robot: &mut Robot<H>, mut on_joint: impl FnMut(Joi
     }
 }
 
-/// How far `joint_test` swings the joints. Fits inside every joint's calibrated limits.
-const JOINT_TEST_DEG: f32 = 30.0;
+/// How far `joint_test` swings the joints. Fits inside every joint's calibrated limits in
+/// both directions.
+pub const JOINT_TEST_DEG: f32 = 30.0;
 
-/// Swings the given joints together in their positive direction by 30 degrees and back,
-/// `times` times, with a hold at each end. Positive only, so the first movement shows which
-/// way "positive" turns (compare with the sign convention on `Joint`; flip `invert` if it is
-/// wrong). Moving a left/right pair together shows at a glance whether they agree.
-pub fn joint_test<H: Hardware>(robot: &mut Robot<H>, joints: &[Joint], times: u32) {
+/// Swings the given joints together by `swing_deg` (normally `JOINT_TEST_DEG`, or its
+/// negative for the other direction) and back, `times` times, with a hold at each end. One
+/// direction per run, so the first movement shows which way the sign turns (compare with
+/// the sign convention on `Joint`; flip `invert` if it is wrong). Moving a left/right pair
+/// together shows at a glance whether they agree.
+pub fn joint_test<H: Hardware>(
+    robot: &mut Robot<H>,
+    joints: &[Joint],
+    swing_deg: f32,
+    times: u32,
+) {
     let home = *robot.current();
-    let out = joints.iter().fold(home, |pose, &j| pose.add(j, JOINT_TEST_DEG));
+    let out = joints.iter().fold(home, |pose, &j| pose.add(j, swing_deg));
     for _ in 0..times {
         robot.move_to(&out, 600);
         robot.pause(700);
         robot.move_to(&home, 600);
         robot.pause(700);
     }
+}
+
+/// Swings the given joints together to `swing_deg`, then through neutral to `-swing_deg`,
+/// `times` times, and back to where they started. E.g. the two hip rolls with a negative
+/// `swing_deg` sway the robot left, then right.
+pub fn sway<H: Hardware>(robot: &mut Robot<H>, joints: &[Joint], swing_deg: f32, times: u32) {
+    let home = *robot.current();
+    let side = |deg: f32| joints.iter().fold(home, |pose, &j| pose.add(j, deg));
+    alternate(robot, &side(swing_deg), &side(-swing_deg), times);
+}
+
+/// Sways the hips left and right `times` times, opening both claws after leaning left and
+/// closing them after leaning right. The hips and claws take turns rather than moving at
+/// once, so each current surge only powers two servos (the shared 5 V supply can't start
+/// four together).
+pub fn sway_and_grip<H: Hardware>(robot: &mut Robot<H>, times: u32) {
+    let home = *robot.current();
+    let hips = |deg: f32| home.add(Joint::RHipRoll, deg).add(Joint::LHipRoll, deg);
+    let open = |pose: Pose| {
+        pose.add(Joint::RGripper, JOINT_TEST_DEG)
+            .add(Joint::LGripper, JOINT_TEST_DEG)
+    };
+    let (left, right) = (hips(-JOINT_TEST_DEG), hips(JOINT_TEST_DEG));
+    for _ in 0..times {
+        robot.move_to(&left, 1000);
+        robot.pause(300);
+        robot.move_to(&open(left), 500);
+        robot.pause(300);
+        robot.move_to(&open(right), 1000);
+        robot.pause(300);
+        robot.move_to(&right, 500);
+        robot.pause(300);
+    }
+    robot.move_to(&home, 600);
+}
+
+/// Moves to `first`, then back and forth between `second` and `first` so that `second` is
+/// reached `times` times, then returns to the starting pose.
+fn alternate<H: Hardware>(robot: &mut Robot<H>, first: &Pose, second: &Pose, times: u32) {
+    let home = *robot.current();
+    robot.move_to(first, 600);
+    robot.pause(500);
+    for i in 0..times {
+        if i > 0 {
+            robot.move_to(first, 1000);
+            robot.pause(500);
+        }
+        robot.move_to(second, 1000);
+        robot.pause(500);
+    }
+    robot.move_to(&home, 600);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -269,7 +327,7 @@ mod tests {
     #[test]
     fn joint_test_moves_only_that_joint_positive_and_returns_home() {
         let mut r = robot();
-        joint_test(&mut r, &[Joint::RElbow], 3);
+        joint_test(&mut r, &[Joint::RElbow], JOINT_TEST_DEG, 3);
         let poses = &r.hardware_mut().poses;
         for pose in poses {
             for j in Joint::ALL.iter().filter(|j| **j != Joint::RElbow) {
@@ -291,7 +349,7 @@ mod tests {
     #[test]
     fn joint_test_moves_listed_joints_together() {
         let mut r = robot();
-        joint_test(&mut r, &[Joint::RHipRoll, Joint::LHipRoll], 1);
+        joint_test(&mut r, &[Joint::RHipRoll, Joint::LHipRoll], JOINT_TEST_DEG, 1);
         for pose in &r.hardware_mut().poses {
             assert_eq!(pose.get(Joint::RHipRoll), pose.get(Joint::LHipRoll));
         }
@@ -300,9 +358,57 @@ mod tests {
     }
 
     #[test]
+    fn sway_goes_to_both_sides_times_times_and_returns_home() {
+        let mut r = robot();
+        sway(&mut r, &[Joint::RHipRoll, Joint::LHipRoll], -JOINT_TEST_DEG, 3);
+        let hip: Vec<f32> = r.hardware_mut().poses.iter().map(|p| p.get(Joint::RHipRoll)).collect();
+        let left = NEUTRAL_DEG - JOINT_TEST_DEG;
+        let right = NEUTRAL_DEG + JOINT_TEST_DEG;
+        // Count arrivals at each side (the value right after reaching it, ignoring repeats).
+        let arrivals = |target: f32| {
+            hip.windows(2)
+                .filter(|w| (w[1] - target).abs() < 1e-3 && (w[0] - target).abs() >= 1e-3)
+                .count()
+        };
+        assert_eq!(arrivals(left), 3);
+        assert_eq!(arrivals(right), 3);
+        assert!(hip.iter().position(|&d| (d - left).abs() < 1e-3)
+            < hip.iter().position(|&d| (d - right).abs() < 1e-3));
+        for pose in &r.hardware_mut().poses {
+            assert_eq!(pose.get(Joint::RHipRoll), pose.get(Joint::LHipRoll));
+        }
+        assert_eq!(*r.current(), Pose::neutral());
+    }
+
+    #[test]
+    fn sway_and_grip_never_moves_hips_and_claws_at_once() {
+        let mut r = robot();
+        sway_and_grip(&mut r, 3);
+        let poses = &r.hardware_mut().poses;
+        for w in poses.windows(2) {
+            let hips_move = w[0].get(Joint::RHipRoll) != w[1].get(Joint::RHipRoll);
+            let claws_move = w[0].get(Joint::RGripper) != w[1].get(Joint::RGripper);
+            assert!(!(hips_move && claws_move));
+        }
+        // Claws open only while leaning left, and open three times.
+        let open = NEUTRAL_DEG + JOINT_TEST_DEG;
+        let opened: Vec<_> = poses
+            .windows(2)
+            .filter(|w| (w[1].get(Joint::LGripper) - open).abs() < 1e-3
+                && (w[0].get(Joint::LGripper) - open).abs() >= 1e-3)
+            .collect();
+        assert_eq!(opened.len(), 3);
+        for w in opened {
+            assert!((w[1].get(Joint::LHipRoll) - (NEUTRAL_DEG - JOINT_TEST_DEG)).abs() < 1e-3);
+        }
+        assert_eq!(*r.current(), Pose::neutral());
+    }
+
+    #[test]
     fn joint_test_swing_fits_every_joints_limits() {
         for cal in CALIBRATION.iter() {
             assert!(NEUTRAL_DEG + JOINT_TEST_DEG <= cal.max_deg, "channel {}", cal.channel);
+            assert!(NEUTRAL_DEG - JOINT_TEST_DEG >= cal.min_deg, "channel {}", cal.channel);
         }
     }
 

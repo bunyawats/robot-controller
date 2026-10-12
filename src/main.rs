@@ -21,12 +21,19 @@ use robot_16_dof::servo::{self, Joint};
 enum Demo {
     /// Moves each joint +15 degrees and back, one at a time, logging its name.
     SelfTest,
-    /// Swings each listed joint +30 degrees and back three times, one joint after another,
-    /// for checking servos one by one. The log names each joint and its PCA9685 channel.
+    /// Swings each listed joint 30 degrees (direction set by `JOINT_TEST_SWING_DEG`) and back
+    /// three times, one joint after another, for checking servos one by one. The log names
+    /// each joint and its PCA9685 channel.
     Joints(&'static [Joint]),
     /// Like `Joints`, but swings all the listed joints at the same time, e.g. a left/right
     /// pair to check that they agree.
     Together(&'static [Joint]),
+    /// Sways the listed joints together to one side and the other three times, starting in
+    /// the direction of `SWAY_FIRST_DEG` (e.g. the hip rolls: left, then right).
+    Sway(&'static [Joint]),
+    /// Sways the hips left and right three times, opening both claws while leaning left and
+    /// closing them while leaning right.
+    SwayAndGrip,
     /// Raises and lowers both arms three times.
     Arms,
     /// Walks 10 steps.
@@ -38,7 +45,14 @@ enum Demo {
     LedCycle,
 }
 
-const DEMO: Demo = Demo::LedCycle;
+const DEMO: Demo = Demo::SwayAndGrip;
+
+/// Which way `Joints` and `Together` swing: `JOINT_TEST_DEG` is each joint's positive
+/// direction (see the sign conventions on `Joint`), `-JOINT_TEST_DEG` the other way.
+const JOINT_TEST_SWING_DEG: f32 = moves::JOINT_TEST_DEG;
+
+/// Where `Sway` goes first. Negative, so the hip rolls lean left first.
+const SWAY_FIRST_DEG: f32 = -moves::JOINT_TEST_DEG;
 
 /// Time to get your hands off the robot and the power connected before anything moves.
 const START_DELAY_SECS: u32 = 5;
@@ -109,12 +123,20 @@ fn main() -> anyhow::Result<()> {
             for &joint in joints {
                 let channel = servo::CALIBRATION[joint.index()].channel;
                 log::info!("Testing joint {joint:?} on channel {channel}");
-                moves::joint_test(&mut robot, &[joint], 3);
+                moves::joint_test(&mut robot, &[joint], JOINT_TEST_SWING_DEG, 3);
             }
         }
         Demo::Together(joints) => {
             log::info!("Testing joints {joints:?} together");
-            moves::joint_test(&mut robot, joints, 3);
+            moves::joint_test(&mut robot, joints, JOINT_TEST_SWING_DEG, 3);
+        }
+        Demo::Sway(joints) => {
+            log::info!("Swaying {joints:?} side to side");
+            moves::sway(&mut robot, joints, SWAY_FIRST_DEG, 3);
+        }
+        Demo::SwayAndGrip => {
+            log::info!("Swaying the hips with the grippers opening and closing");
+            moves::sway_and_grip(&mut robot, 3);
         }
         Demo::Arms => {
             moves::arm_up_down(&mut robot, Arm::Both, 3);
