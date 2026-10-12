@@ -28,12 +28,18 @@ enum Demo {
     /// Like `Joints`, but swings all the listed joints at the same time, e.g. a left/right
     /// pair to check that they agree.
     Together(&'static [Joint]),
+    /// Swings each listed joint, one after another, slowly through its whole calibrated range
+    /// (max limit, then min limit, twice) and back to neutral.
+    FullRange(&'static [Joint]),
     /// Sways the listed joints together to one side and the other three times, starting in
     /// the direction of `SWAY_FIRST_DEG` (e.g. the hip rolls: left, then right).
     Sway(&'static [Joint]),
     /// Sways the hips left and right three times, opening both claws while leaning left and
     /// closing them while leaning right.
     SwayAndGrip,
+    /// Like `SwayAndGrip` with the arms too: lean left, arms up, claws open, lean right,
+    /// claws close, arms down, three times. One pair of servos moves at a time.
+    SwayArmsAndGrip,
     /// Raises and lowers both arms three times.
     Arms,
     /// Walks 10 steps.
@@ -45,7 +51,7 @@ enum Demo {
     LedCycle,
 }
 
-const DEMO: Demo = Demo::SwayAndGrip;
+const DEMO: Demo = Demo::SwayArmsAndGrip;
 
 /// Which way `Joints` and `Together` swing: `JOINT_TEST_DEG` is each joint's positive
 /// direction (see the sign conventions on `Joint`), `-JOINT_TEST_DEG` the other way.
@@ -130,6 +136,18 @@ fn main() -> anyhow::Result<()> {
             log::info!("Testing joints {joints:?} together");
             moves::joint_test(&mut robot, joints, JOINT_TEST_SWING_DEG, 3);
         }
+        Demo::FullRange(joints) => {
+            for &joint in joints {
+                let cal = &servo::CALIBRATION[joint.index()];
+                log::info!(
+                    "Full range of {joint:?} on channel {}: {} to {} degrees",
+                    cal.channel,
+                    cal.max_deg,
+                    cal.min_deg
+                );
+                moves::full_range_test(&mut robot, &[joint], 2);
+            }
+        }
         Demo::Sway(joints) => {
             log::info!("Swaying {joints:?} side to side");
             moves::sway(&mut robot, joints, SWAY_FIRST_DEG, 3);
@@ -137,6 +155,10 @@ fn main() -> anyhow::Result<()> {
         Demo::SwayAndGrip => {
             log::info!("Swaying the hips with the grippers opening and closing");
             moves::sway_and_grip(&mut robot, 3);
+        }
+        Demo::SwayArmsAndGrip => {
+            log::info!("Swaying the hips with the arms and grippers, one pair at a time");
+            moves::sway_arms_and_grip(&mut robot, 3);
         }
         Demo::Arms => {
             moves::arm_up_down(&mut robot, Arm::Both, 3);

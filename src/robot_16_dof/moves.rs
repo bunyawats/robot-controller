@@ -4,7 +4,7 @@
 //! tuning on the real robot. Do the self-test and fix `CALIBRATION` first.
 
 use crate::robot_16_dof::motion::{Hardware, Pose, Robot};
-use crate::robot_16_dof::servo::Joint;
+use crate::robot_16_dof::servo::{Joint, CALIBRATION, NEUTRAL_DEG};
 
 // ---------------------------------------------------------------------------------------
 // Self-test
@@ -52,6 +52,25 @@ pub fn joint_test<H: Hardware>(
     }
 }
 
+/// Swings each given joint, one after another, through its whole calibrated range: from
+/// neutral slowly to its max limit, then to its min limit, then back to neutral, `times`
+/// times. Shows the full travel of a joint, and whether it hits anything on the way.
+pub fn full_range_test<H: Hardware>(robot: &mut Robot<H>, joints: &[Joint], times: u32) {
+    for &joint in joints {
+        let cal = &CALIBRATION[joint.index()];
+        let home = *robot.current();
+        let at = |deg: f32| home.with(joint, deg - NEUTRAL_DEG);
+        for _ in 0..times {
+            robot.move_to(&at(cal.max_deg), 2000);
+            robot.pause(1000);
+            robot.move_to(&at(cal.min_deg), 3000);
+            robot.pause(1000);
+        }
+        robot.move_to(&home, 2000);
+        robot.pause(500);
+    }
+}
+
 /// Swings the given joints together to `swing_deg`, then through neutral to `-swing_deg`,
 /// `times` times, and back to where they started. E.g. the two hip rolls with a negative
 /// `swing_deg` sway the robot left, then right.
@@ -82,6 +101,33 @@ pub fn sway_and_grip<H: Hardware>(robot: &mut Robot<H>, times: u32) {
         robot.pause(300);
         robot.move_to(&right, 500);
         robot.pause(300);
+    }
+    robot.move_to(&home, 600);
+}
+
+/// Like `sway_and_grip` with the arms too: lean left, raise both arms, open both claws, lean
+/// right, close the claws, lower the arms, `times` times. Only one pair of servos (hips,
+/// shoulder pitches or grippers) moves at a time, because the shared 5 V supply can't start
+/// more than about two servos at once.
+pub fn sway_arms_and_grip<H: Hardware>(robot: &mut Robot<H>, times: u32) {
+    let home = *robot.current();
+    let pair = |a: Joint, b: Joint| move |pose: Pose, deg: f32| pose.add(a, deg).add(b, deg);
+    let hips = pair(Joint::RHipRoll, Joint::LHipRoll);
+    let arms_up = |pose| pair(Joint::RShoulderPitch, Joint::LShoulderPitch)(pose, JOINT_TEST_DEG);
+    let open = |pose| pair(Joint::RGripper, Joint::LGripper)(pose, JOINT_TEST_DEG);
+    let (left, right) = (hips(home, -JOINT_TEST_DEG), hips(home, JOINT_TEST_DEG));
+    for _ in 0..times {
+        for (pose, ms) in [
+            (left, 1000),
+            (arms_up(left), 600),
+            (open(arms_up(left)), 500),
+            (open(arms_up(right)), 1000),
+            (arms_up(right), 500),
+            (right, 600),
+        ] {
+            robot.move_to(&pose, ms);
+            robot.pause(300);
+        }
     }
     robot.move_to(&home, 600);
 }
@@ -301,6 +347,7 @@ mod tests {
     use crate::robot_16_dof::motion::test_support::MockHw;
     use crate::robot_16_dof::servo::{CALIBRATION, NEUTRAL_DEG};
 
+
     fn robot() -> Robot<MockHw> {
         Robot::new(MockHw::default())
     }
@@ -401,6 +448,41 @@ mod tests {
         for w in opened {
             assert!((w[1].get(Joint::LHipRoll) - (NEUTRAL_DEG - JOINT_TEST_DEG)).abs() < 1e-3);
         }
+        assert_eq!(*r.current(), Pose::neutral());
+    }
+
+    #[test]
+    fn full_range_test_reaches_both_limits_of_only_that_joint() {
+        let mut r = robot();
+        full_range_test(&mut r, &[Joint::RShoulderPitch], 1);
+        let cal = &CALIBRATION[Joint::RShoulderPitch.index()];
+        let poses = &r.hardware_mut().poses;
+        let deg: Vec<f32> = poses.iter().map(|p| p.get(Joint::RShoulderPitch)).collect();
+        assert!(deg.iter().any(|&d| (d - cal.max_deg).abs() < 1e-3));
+        assert!(deg.iter().any(|&d| (d - cal.min_deg).abs() < 1e-3));
+        for p in poses {
+            assert_eq!(p.get(Joint::LShoulderPitch), NEUTRAL_DEG);
+        }
+        assert_eq!(*r.current(), Pose::neutral());
+    }
+
+    #[test]
+    fn sway_arms_and_grip_moves_one_pair_at_a_time() {
+        let mut r = robot();
+        sway_arms_and_grip(&mut r, 3);
+        let pairs = [
+            Joint::RHipRoll,
+            Joint::RShoulderPitch,
+            Joint::RGripper,
+        ];
+        for w in r.hardware_mut().poses.windows(2) {
+            let moving = pairs.iter().filter(|&&j| w[0].get(j) != w[1].get(j)).count();
+            assert!(moving <= 1, "{moving} pairs moved in one step");
+        }
+        let poses = &r.hardware_mut().poses;
+        let up = NEUTRAL_DEG + JOINT_TEST_DEG;
+        assert!(poses.iter().any(|p| (p.get(Joint::LShoulderPitch) - up).abs() < 1e-3));
+        assert!(poses.iter().any(|p| (p.get(Joint::LGripper) - up).abs() < 1e-3));
         assert_eq!(*r.current(), Pose::neutral());
     }
 
