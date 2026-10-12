@@ -27,15 +27,16 @@ pub fn self_test<H: Hardware>(robot: &mut Robot<H>, mut on_joint: impl FnMut(Joi
     }
 }
 
-/// How far `joint_test` swings the joint. Fits inside every joint's calibrated limits.
+/// How far `joint_test` swings the joints. Fits inside every joint's calibrated limits.
 const JOINT_TEST_DEG: f32 = 30.0;
 
-/// Swings one joint in its positive direction by 30 degrees and back, `times` times, with a
-/// hold at each end. Positive only, so the first movement shows which way "positive" turns
-/// (compare with the sign convention on `Joint`; flip `invert` if it is wrong).
-pub fn joint_test<H: Hardware>(robot: &mut Robot<H>, joint: Joint, times: u32) {
+/// Swings the given joints together in their positive direction by 30 degrees and back,
+/// `times` times, with a hold at each end. Positive only, so the first movement shows which
+/// way "positive" turns (compare with the sign convention on `Joint`; flip `invert` if it is
+/// wrong). Moving a left/right pair together shows at a glance whether they agree.
+pub fn joint_test<H: Hardware>(robot: &mut Robot<H>, joints: &[Joint], times: u32) {
     let home = *robot.current();
-    let out = home.add(joint, JOINT_TEST_DEG);
+    let out = joints.iter().fold(home, |pose, &j| pose.add(j, JOINT_TEST_DEG));
     for _ in 0..times {
         robot.move_to(&out, 600);
         robot.pause(700);
@@ -268,7 +269,7 @@ mod tests {
     #[test]
     fn joint_test_moves_only_that_joint_positive_and_returns_home() {
         let mut r = robot();
-        joint_test(&mut r, Joint::RElbow, 3);
+        joint_test(&mut r, &[Joint::RElbow], 3);
         let poses = &r.hardware_mut().poses;
         for pose in poses {
             for j in Joint::ALL.iter().filter(|j| **j != Joint::RElbow) {
@@ -285,6 +286,17 @@ mod tests {
             .count();
         assert_eq!(tops, 3);
         assert_eq!(*r.current(), Pose::neutral());
+    }
+
+    #[test]
+    fn joint_test_moves_listed_joints_together() {
+        let mut r = robot();
+        joint_test(&mut r, &[Joint::RHipRoll, Joint::LHipRoll], 1);
+        for pose in &r.hardware_mut().poses {
+            assert_eq!(pose.get(Joint::RHipRoll), pose.get(Joint::LHipRoll));
+        }
+        let top = r.hardware_mut().poses.iter().map(|p| p.get(Joint::LHipRoll)).fold(0.0, f32::max);
+        assert!((top - (NEUTRAL_DEG + JOINT_TEST_DEG)).abs() < 1e-3);
     }
 
     #[test]

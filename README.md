@@ -8,6 +8,7 @@ walk. There is no networking and no remote control.
 
 Photos: [the robot](16%20DOF%20Robot.jpg) (4 servos per arm, 4 per leg),
 [the kit manual's servo numbering](Robot%20Schema.png),
+[the ESP32-S3 board on its own](ESP32-Board.jpg),
 [the ESP32-S3 on its extension board](ESP32-Extension%20Board.jpg) and
 [the PCA9685 board](PCA9685.jpg).
 
@@ -15,7 +16,24 @@ The board is an ESP32-S3-N16R8 module (16 MB flash, 8 MB octal PSRAM) on a DevKi
 board with two USB-C ports, plugged into an "ESP32 Extension Board" (DC 6.5-9 V barrel jack,
 5V and 3V3 headers, and an S / 3.3V / GND pin row per GPIO). Flash and monitor through the
 USB-C port wired to the onboard WCH USB-serial chip; on this Mac it shows up as
-`/dev/cu.usbmodem5CF70246821`.
+`/dev/cu.usbmodem5CF70246821`. The other USB-C port is the S3's native USB
+(`/dev/cu.usbmodem31xxx`, the number changes): it reconnects on every reset, and resets
+through it often leave the chip waiting for a download, so reflash instead of resetting
+if you use that port.
+
+The square white part on the ESP32-S3 board is a WS2812 RGB LED on GPIO48. The firmware
+uses it as a status light:
+
+| Colour | Meaning |
+|---|---|
+| Blue | Boot countdown, hands off the robot |
+| Green | Demo running |
+| Off | Demo finished with no errors |
+| Red | PCA9685 not answering at boot, or a servo write failed during the run (stays red until reset) |
+
+`Demo::LedCycle` fades the LED through the rainbow forever without touching I2C, so it
+works with nothing else connected. If the LED stays dark, look for an `RGB` solder pad
+that needs bridging; some boards of this kind put the LED on GPIO38 instead.
 
 [WIRING.md](WIRING.md) has the full ESP32-S3 to PCA9685 wiring guide with a diagram and a
 pre-power-on checklist.
@@ -77,8 +95,9 @@ The joint names and channels in `src/servo.rs` come from the kit manual, but whi
 3. After a 5 second countdown every joint snaps to neutral, then each one moves +15 degrees
    and back, one at a time. The log prints the joint name before each move.
 4. Write down which physical servo moved for each name, and which way it went.
-   To check one servo at a time, set `DEMO = Demo::OneJoint(Joint::...)` instead: after the
-   countdown that joint swings +30 degrees (its positive direction) and back three times.
+   To check servos one at a time, set `DEMO = Demo::Joints(&[Joint::...])` instead: after the
+   countdown each listed joint in turn swings +30 degrees (its positive direction) and back
+   three times.
 5. Edit `CALIBRATION` (and the `Joint` enum order or names if needed) in `src/servo.rs`:
    - `channel`: the PCA9685 channel that servo is really plugged into
    - `invert`: set `true` if the joint moved the wrong way (positive angles are documented
@@ -119,7 +138,7 @@ set `RELEASE_AT_END` in `src/main.rs` to cut servo power instead (the robot then
 | `src/pca9685.rs` | Minimal PCA9685 driver over a small `Transport` trait | none |
 | `src/motion.rs` | Poses, smooth interpolation between them | none |
 | `src/moves.rs` | Self-test, arm up/down, walk | none |
-| `src/main.rs` | ESP32-S3 wiring (I2C, boot countdown, demo selection) | ESP32-S3 |
+| `src/main.rs` | ESP32-S3 wiring (I2C, status LED, boot countdown, demo selection) | ESP32-S3 |
 
 The first four modules have no ESP dependencies and carry unit tests. To run them on a PC,
 include them from a small test crate with `#[path = "..."] mod servo;` and so on, then
