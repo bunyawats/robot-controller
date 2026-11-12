@@ -1,0 +1,12 @@
+[robot-controller]
+wifi_ssid = ""
+wifi_pass = ""
+# Prefer the broker host's .local mDNS hostname over a literal IP: the broker's DHCP address
+# can change (e.g. after a router restart), but ESP-IDF resolves .local names with an mDNS
+# query on every connect and reconnect. On a Mac broker host the name is
+# "$(scutil --get LocalHostName).local", e.g. mqtt_url = "mqtt://my-mac.local:1883"
+mqtt_url = "mqtt://broker.example.com:1883"
+mqtt_client_id = "robot-controller"
+# The device subscribes to <prefix>/servo/+, <prefix>/servos, <prefix>/led and <prefix>/cmd,
+# and publishes its status on <prefix>/status.
+topic_prefix = "robot"

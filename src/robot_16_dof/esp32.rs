@@ -1,5 +1,8 @@
 //! ESP32-S3 glue for the robot: the PCA9685 on I2C, and the `Hardware` that drives it.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use esp_idf_svc::hal::delay::{FreeRtos, TickType, BLOCK};
 use esp_idf_svc::hal::gpio::{InputPin, OutputPin};
 use esp_idf_svc::hal::i2c::{I2c, I2cConfig, I2cDriver};
@@ -72,14 +75,17 @@ pub struct Servos<F: FaultSignal> {
     pub fault_signal: F,
     /// Set by the first failed write, which is the only one passed to `fault_signal`.
     pub write_failed: bool,
+    /// Set from another thread to stop the current move (see `motion::Robot`).
+    abort: Arc<AtomicBool>,
 }
 
 impl<F: FaultSignal> Servos<F> {
-    pub fn new(pca: Pca9685<I2cBus>, fault_signal: F) -> Self {
+    pub fn new(pca: Pca9685<I2cBus>, fault_signal: F, abort: Arc<AtomicBool>) -> Self {
         Self {
             pca,
             fault_signal,
             write_failed: false,
+            abort,
         }
     }
 }
@@ -98,5 +104,9 @@ impl<F: FaultSignal> Hardware for Servos<F> {
 
     fn delay_ms(&mut self, ms: u32) {
         FreeRtos::delay_ms(ms);
+    }
+
+    fn should_abort(&mut self) -> bool {
+        self.abort.load(Ordering::Relaxed)
     }
 }

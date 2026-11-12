@@ -1,10 +1,11 @@
-//! Hardcoded body movements: self-test, arm up/down, and a simple walk.
+//! Body movements: self-test, joint moves, sway, stand up/stand by, dance, arm up/down and a
+//! simple walk.
 //!
 //! These are starting points. Servo directions, trims and the gait numbers below all need
 //! tuning on the real robot. Do the self-test and fix `CALIBRATION` first.
 
 use crate::robot_16_dof::motion::{Hardware, Pose, Robot};
-use crate::robot_16_dof::servo::{Joint, CALIBRATION, NEUTRAL_DEG};
+use crate::robot_16_dof::servo::{self, Joint, CALIBRATION, NEUTRAL_DEG, NUM_JOINTS};
 
 // ---------------------------------------------------------------------------------------
 // Self-test
@@ -147,6 +148,113 @@ fn alternate<H: Hardware>(robot: &mut Robot<H>, first: &Pose, second: &Pose, tim
         robot.pause(500);
     }
     robot.move_to(&home, 600);
+}
+
+// ---------------------------------------------------------------------------------------
+// Moving given joints, standing, dancing
+// ---------------------------------------------------------------------------------------
+
+/// How many servos may start moving together. The extension board's 5 V supply can only
+/// start about two at once, so bigger moves are split into groups of this size.
+pub const MAX_SERVOS_AT_ONCE: usize = 2;
+
+/// Moves the given joints to the given logical angles (clamped to their calibrated limits),
+/// `MAX_SERVOS_AT_ONCE` joints at a time in the given order, each group over `ms`. Joints
+/// already at their target are skipped. Other joints stay where they are.
+pub fn move_joints<H: Hardware>(robot: &mut Robot<H>, targets: &[(Joint, f32)], ms: u32) {
+    for group in targets.chunks(MAX_SERVOS_AT_ONCE) {
+        let start = *robot.current();
+        let target = group.iter().fold(start, |pose, &(joint, deg)| {
+            pose.with(joint, servo::clamp_to_limits(joint, deg) - NEUTRAL_DEG)
+        });
+        if target != start {
+            robot.move_to(&target, ms);
+        }
+    }
+}
+
+/// The order `stand_up` and `stand_by` return the joints to neutral, two at a time: legs
+/// first (from the feet up, mirrored pairs; each knee's two servos together so the foot
+/// stays flat), then the arms.
+const STAND_ORDER: [Joint; NUM_JOINTS] = [
+    Joint::RAnkleRoll,
+    Joint::LAnkleRoll,
+    Joint::RKneeUpper,
+    Joint::RKneeLower,
+    Joint::LKneeUpper,
+    Joint::LKneeLower,
+    Joint::RHipRoll,
+    Joint::LHipRoll,
+    Joint::RShoulderPitch,
+    Joint::LShoulderPitch,
+    Joint::RShoulderRoll,
+    Joint::LShoulderRoll,
+    Joint::RElbow,
+    Joint::LElbow,
+    Joint::RGripper,
+    Joint::LGripper,
+];
+
+const STAND_UP_PAIR_MS: u32 = 600;
+const STAND_BY_PAIR_MS: u32 = 1000;
+
+fn to_neutral_in_pairs<H: Hardware>(robot: &mut Robot<H>, pair_ms: u32) {
+    let targets = STAND_ORDER.map(|joint| (joint, NEUTRAL_DEG));
+    move_joints(robot, &targets, pair_ms);
+}
+
+/// Stands up straight: every joint back to neutral, two at a time, legs first.
+pub fn stand_up<H: Hardware>(robot: &mut Robot<H>) {
+    to_neutral_in_pairs(robot, STAND_UP_PAIR_MS);
+}
+
+/// Rest pose for waiting: the same straight neutral stance as `stand_up`, reached more
+/// slowly. The servos keep holding it (they don't go limp).
+pub fn stand_by<H: Hardware>(robot: &mut Robot<H>) {
+    to_neutral_in_pairs(robot, STAND_BY_PAIR_MS);
+}
+
+/// How far the hips lean during `dance`.
+const DANCE_LEAN_DEG: f32 = 20.0;
+
+/// A short dance, `times` times: lean left and raise the left arm, snap both claws twice,
+/// lower the arm; the same to the right; then centre and swing both arms out sideways and
+/// back. At most one pair of servos moves at a time. Ends where it started.
+pub fn dance<H: Hardware>(robot: &mut Robot<H>, times: u32) {
+    let home = *robot.current();
+    let hips = |pose: Pose, deg: f32| pose.add(Joint::RHipRoll, deg).add(Joint::LHipRoll, deg);
+    let claws_open = |pose: Pose| {
+        pose.add(Joint::RGripper, JOINT_TEST_DEG)
+            .add(Joint::LGripper, JOINT_TEST_DEG)
+    };
+    let arms_out = home
+        .add(Joint::RShoulderRoll, JOINT_TEST_DEG)
+        .add(Joint::LShoulderRoll, JOINT_TEST_DEG);
+    for _ in 0..times {
+        for (lean, arm) in [
+            (-DANCE_LEAN_DEG, Joint::LShoulderPitch),
+            (DANCE_LEAN_DEG, Joint::RShoulderPitch),
+        ] {
+            let leaned = hips(home, lean);
+            let raised = leaned.add(arm, ARM_RAISE_DEG);
+            for (pose, ms) in [
+                (leaned, 500),
+                (raised, 500),
+                (claws_open(raised), 250),
+                (raised, 250),
+                (claws_open(raised), 250),
+                (raised, 250),
+                (leaned, 500),
+            ] {
+                robot.move_to(&pose, ms);
+            }
+        }
+        robot.move_to(&home, 500);
+        robot.move_to(&arms_out, 400);
+        robot.pause(200);
+        robot.move_to(&home, 400);
+        robot.pause(200);
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -517,6 +625,127 @@ mod tests {
             .filter(|p| (p.get(Joint::RShoulderPitch) - (NEUTRAL_DEG + ARM_RAISE_DEG)).abs() < 1e-3)
             .count();
         assert_eq!(tops, 4);
+    }
+
+    /// Every joint of every written pose is within its calibrated limits.
+    fn assert_within_limits(poses: &[Pose]) {
+        for pose in poses {
+            for (i, cal) in CALIBRATION.iter().enumerate() {
+                let v = pose.0[i];
+                assert!(
+                    v >= cal.min_deg && v <= cal.max_deg,
+                    "joint {:?} reached {v}, outside {}..{}",
+                    Joint::ALL[i],
+                    cal.min_deg,
+                    cal.max_deg
+                );
+            }
+        }
+    }
+
+    /// No two consecutive written poses differ in more than `MAX_SERVOS_AT_ONCE` joints.
+    fn assert_at_most_two_servos_move(start: Pose, poses: &[Pose]) {
+        let mut prev = start;
+        for pose in poses {
+            let moving = (0..NUM_JOINTS).filter(|&i| prev.0[i] != pose.0[i]).count();
+            assert!(moving <= MAX_SERVOS_AT_ONCE, "{moving} servos moved in one step");
+            prev = *pose;
+        }
+    }
+
+    #[test]
+    fn move_joints_moves_two_at_a_time_and_clamps() {
+        let mut r = robot();
+        let targets = [
+            (Joint::RElbow, 100.0),
+            (Joint::LElbow, 80.0),
+            (Joint::RHipRoll, 500.0),
+            (Joint::RGripper, 120.0),
+            (Joint::LGripper, 120.0),
+        ];
+        move_joints(&mut r, &targets, 200);
+        assert_at_most_two_servos_move(Pose::neutral(), &r.hardware_mut().poses);
+        let end = *r.current();
+        assert_eq!(end.get(Joint::RElbow), 100.0);
+        assert_eq!(end.get(Joint::LElbow), 80.0);
+        assert_eq!(end.get(Joint::RHipRoll), CALIBRATION[Joint::RHipRoll.index()].max_deg);
+        assert_eq!(end.get(Joint::LGripper), 120.0);
+        assert_eq!(end.get(Joint::LHipRoll), NEUTRAL_DEG);
+        // Three groups of 200 ms.
+        assert_eq!(r.hardware_mut().elapsed_ms, 600);
+    }
+
+    #[test]
+    fn move_joints_skips_groups_already_in_place() {
+        let mut r = robot();
+        move_joints(&mut r, &[(Joint::RElbow, NEUTRAL_DEG), (Joint::LElbow, NEUTRAL_DEG)], 200);
+        assert!(r.hardware_mut().poses.is_empty());
+    }
+
+    #[test]
+    fn stand_order_covers_every_joint_once() {
+        for j in Joint::ALL {
+            assert_eq!(STAND_ORDER.iter().filter(|&&s| s == j).count(), 1, "{j:?}");
+        }
+    }
+
+    #[test]
+    fn stand_up_returns_to_neutral_two_servos_at_a_time() {
+        let mut r = robot();
+        let start = Pose::neutral()
+            .with(Joint::RKneeUpper, 20.0)
+            .with(Joint::RKneeLower, -20.0)
+            .with(Joint::LShoulderPitch, 60.0)
+            .with(Joint::RGripper, 30.0);
+        r.snap_to(&start);
+        stand_up(&mut r);
+        assert_at_most_two_servos_move(start, &r.hardware_mut().poses);
+        assert_eq!(*r.current(), Pose::neutral());
+        // The knee pair moves together, keeping the foot flat.
+        for p in &r.hardware_mut().poses {
+            let off = |j: Joint| p.get(j) - NEUTRAL_DEG;
+            assert_eq!(off(Joint::RKneeUpper), -off(Joint::RKneeLower));
+        }
+    }
+
+    #[test]
+    fn stand_by_ends_at_neutral_more_slowly_than_stand_up() {
+        let start = Pose::neutral().with(Joint::RElbow, 30.0);
+        let mut up = robot();
+        up.snap_to(&start);
+        stand_up(&mut up);
+        let mut by = robot();
+        by.snap_to(&start);
+        stand_by(&mut by);
+        assert_eq!(*by.current(), Pose::neutral());
+        assert!(by.hardware_mut().elapsed_ms > up.hardware_mut().elapsed_ms);
+    }
+
+    #[test]
+    fn dance_stays_in_limits_moves_one_pair_at_a_time_and_returns_home() {
+        let mut r = robot();
+        dance(&mut r, 3);
+        let poses = r.hardware_mut().poses.clone();
+        assert_within_limits(&poses);
+        assert_at_most_two_servos_move(Pose::neutral(), &poses);
+        assert_eq!(*r.current(), Pose::neutral());
+        // Both arms get raised and both claws open.
+        let max = |j: Joint| poses.iter().map(|p| p.get(j)).fold(0.0, f32::max);
+        assert_eq!(max(Joint::LShoulderPitch), NEUTRAL_DEG + ARM_RAISE_DEG);
+        assert_eq!(max(Joint::RShoulderPitch), NEUTRAL_DEG + ARM_RAISE_DEG);
+        assert_eq!(max(Joint::RGripper), NEUTRAL_DEG + JOINT_TEST_DEG);
+    }
+
+    #[test]
+    fn an_abort_ends_a_long_routine_early() {
+        let mut r = Robot::new(MockHw {
+            abort_after_writes: Some(10),
+            ..Default::default()
+        });
+        dance(&mut r, 3);
+        walk(&mut r, 10, &DEFAULT_GAIT);
+        assert!(r.aborted());
+        assert_eq!(r.hardware_mut().poses.len(), 10);
     }
 
     #[test]

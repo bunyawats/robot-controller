@@ -1,8 +1,9 @@
 # robot-controller
 
 ESP32-S3 firmware (Rust, `esp-idf-svc` std stack) that drives a 16-servo biped through a
-PCA9685 servo driver. Moves are hardcoded: a joint self-test, arm up/down, and a 10-step
-walk. There is no networking and no remote control.
+PCA9685 servo driver, controlled over MQTT: single servos, several servos at once, the RGB
+status LED, and named actions (sway, walk, stand up, dance, stand by, rainbow, ...). See
+[MQTT control](#mqtt-control).
 
 ## Hardware
 
@@ -26,14 +27,20 @@ uses it as a status light:
 
 | Colour | Meaning |
 |---|---|
-| Blue | Boot countdown, hands off the robot |
-| Green | Demo running |
-| Off | Demo finished with no errors |
-| Red | PCA9685 not answering at boot, or a servo write failed during the run (stays red until reset) |
+| Blue | Boot countdown (hands off the robot), or not connected to the MQTT broker |
+| Green | Idle, ready for a command |
+| Yellow | Busy running a robot command (other robot commands are rejected) |
+| Dim blue | Stand-by (after `stand_by`) |
+| Red | PCA9685 not answering at boot, or a servo write failed (stays red until reset) |
 
-`Demo::LedCycle` fades the LED through the rainbow forever without touching I2C, so it
-works with nothing else connected. If the LED stays dark, look for an `RGB` solder pad
-that needs bridging; some boards of this kind put the LED on GPIO38 instead.
+If the PCA9685 doesn't answer at boot, the firmware still connects to MQTT: the state is
+`pca9685_not_found`, robot commands are rejected with `rejected_no_servos`, and LED commands
+still work (so the LED and MQTT can be tested without the servo board). Fix the wiring and
+reset to use the servos.
+
+A colour set over MQTT (`<prefix>/led`) replaces the status colours until `auto` is sent;
+red for a fault always wins. If the LED stays dark, look for an `RGB` solder pad that needs
+bridging; some boards of this kind put the LED on GPIO38 instead.
 
 [WIRING.md](WIRING.md) has the full ESP32-S3 to PCA9685 wiring guide with a diagram and a
 pre-power-on checklist.
@@ -91,13 +98,15 @@ The joint names and channels in `src/robot_16_dof/servo.rs` come from the kit ma
 "right" and which way each servo turns are a **guess**. Check them first:
 
 1. Hang the robot or lay it on its back so no joint can drive into the table.
-2. Flash with `DEMO = Demo::SelfTest` (the default in `src/main.rs`).
-3. After a 5 second countdown every joint snaps to neutral, then each one moves +15 degrees
-   and back, one at a time. The log prints the joint name before each move.
+2. Flash, wait for the 5 second countdown (every joint then snaps to neutral) and for the
+   LED to turn green.
+3. Send `self_test` to `robot/cmd`: each joint moves +15 degrees and back, one at a time.
+   The log prints the joint name before each move.
 4. Write down which physical servo moved for each name, and which way it went.
-   To check servos one at a time, set `DEMO = Demo::Joints(&[Joint::...])` instead: after the
-   countdown each listed joint in turn swings +30 degrees (its positive direction) and back
-   three times.
+   To check servos one at a time, send
+   `{"cmd":"joint_test","joints":["s4"]}` (+30 degrees, its positive direction, and back
+   three times; add `"deg":-30` for the other way) or
+   `{"cmd":"full_range","joints":["s4"],"times":1}`.
 5. Edit `CALIBRATION` (and the `Joint` enum order or names if needed) in `src/robot_16_dof/servo.rs`:
    - `channel`: the PCA9685 channel that servo is really plugged into
    - `invert`: set `true` if the joint moved the wrong way (positive angles are documented
@@ -105,7 +114,73 @@ The joint names and channels in `src/robot_16_dof/servo.rs` come from the kit ma
    - `trim_deg`: nudge so neutral (90) means the joint is truly centered
    - `min_deg` / `max_deg`: widen only after checking the joint cannot bind
 6. Repeat until neutral looks like standing straight with arms down.
-7. Then set `DEMO` to `Demo::Arms`, `Demo::Walk` or `Demo::All`.
+7. Then try `arms`, `sway`, `dance` and, holding the robot, `walk`.
+
+## MQTT control
+
+Set the WiFi and broker in `cfg.toml` (see [Build and flash](#build-and-flash)). Topics are
+under `topic_prefix` (default `robot`):
+
+| Topic | Payload | Effect |
+|---|---|---|
+| `robot/servo/<joint>` | `120` or `{"angle":120,"ms":500}` | Moves one servo |
+| `robot/servos` | `{"r_hip_roll":100,"l_hip_roll":80,"ms":600}` | Moves several servos, two at a time in the given order |
+| `robot/led` | `off`, `auto`, `rainbow`, `red`/`green`/`blue`/`yellow`/`cyan`/`magenta`/`orange`/`white`, `#rrggbb` or `{"r":0,"g":40,"b":0}` | Sets the LED (applied at once, even while busy) |
+| `robot/cmd` | an action word, or `{"cmd":"walk","steps":6}` | Runs an action (below) |
+| `robot/status` | published by the robot | `{"state":"busy","action":"walk","reason":"started","error":null}` |
+
+- **Joints** are named `r_ankle_roll`, `r_knee_lower`, `r_knee_upper`, `r_hip_roll`,
+  `r_shoulder_pitch`, `r_shoulder_roll`, `r_elbow`, `r_gripper` and the same with `l_`, or
+  by the kit's servo number (`s1`-`s8`, `s25`-`s32`, or just `4`).
+- **Angles** are logical degrees: 90 is neutral, and each joint's sign convention is on the
+  `Joint` enum in `src/robot_16_dof/servo.rs`. Angles beyond a joint's calibrated limits are
+  clamped. `ms` (100-10000, default 500) is the time for each move; `robot/servos` moves
+  two servos at a time (the servo supply can't start more at once), so the whole move
+  takes `ms` for every pair.
+- **Named colours** use brightness 64 of 255; `#rrggbb` and `{"r","g","b"}` are sent as
+  given (the LED is very bright at 255).
+
+Actions on `robot/cmd` (words are case-insensitive; `stand_by`, `standby` and `stand-by`
+are the same):
+
+| Action | Parameters | What it does |
+|---|---|---|
+| `sway` | `times` (3) | Hips and ankles lean left and right together |
+| `sway_grip` | `times` (3) | Hips sway, claws open on the left and close on the right |
+| `sway_arms` | `times` (3) | Like `sway_grip`, raising and lowering the arms too |
+| `walk` | `steps` (4, max 20) | Lean-and-shuffle walk (knees not verified yet: hold the robot) |
+| `stand_up` | | Every joint back to neutral, two at a time, legs first |
+| `dance` | `times` (3) | Lean, raise an arm, snap the claws, each side, then arms out |
+| `stand_by` | | Same neutral stance reached slowly; LED dim blue; servos keep holding |
+| `arms` | `arm` (`both`/`left`/`right`), `times` (3) | Raise and lower the arms |
+| `release` | | Cut the servo pulses: the robot goes limp and may fall |
+| `rainbow` | | LED rainbow fade (same as `rainbow` on `robot/led`) |
+| `stop` | | Stop the running action where it is (within 20 ms) |
+| `self_test` | | Each joint +15 degrees and back, one at a time |
+| `joint_test` | `joints` (required), `deg` (30, max +-60), `times` (3) | Swing the listed joints together |
+| `full_range` | `joints` (required), `times` (3) | Each listed joint through its calibrated range |
+
+`times` is 1-10. Only one robot command runs at a time: while one is running (LED yellow),
+other robot commands are rejected with `"reason":"rejected_busy"`; LED commands and `stop`
+still work. Invalid messages get `"reason":"rejected_invalid"` with the problem in `error`.
+Every action publishes `started` and then `done` or `stopped`, and a `heartbeat` goes out
+every 30 s.
+
+After `release`, the next move re-energizes every servo at once from the last commanded
+pose; send `stand_up` first.
+
+Examples:
+
+```bash
+B=mqtt-broker.local   # your broker host
+mosquitto_sub -h $B -t 'robot/status' -v &
+mosquitto_pub -h $B -t robot/servo/s5 -m 150
+mosquitto_pub -h $B -t robot/servos -m '{"s5":150,"s28":150,"ms":800}'
+mosquitto_pub -h $B -t robot/led -m '#200020'
+mosquitto_pub -h $B -t robot/cmd -m dance
+mosquitto_pub -h $B -t robot/cmd -m '{"cmd":"walk","steps":2}'
+mosquitto_pub -h $B -t robot/cmd -m stop
+```
 
 ## Build and flash
 
@@ -119,6 +194,15 @@ espup install --toolchain-version 1.98.1.0 --name esp-1.98 --targets esp32,esp32
 cargo install espflash ldproxy
 ```
 
+Copy the config template and fill in your WiFi and broker. `cfg.toml` is gitignored and
+compiled into the firmware, so any change needs a rebuild and reflash. Use the broker
+host's `.local` mDNS hostname rather than its IP, so a DHCP change on the broker host
+doesn't break the connection:
+
+```bash
+cp cfg.toml.example cfg.toml
+```
+
 Then:
 
 ```bash
@@ -127,8 +211,8 @@ cargo build --release
 espflash flash --monitor -p /dev/cu.usbmodem5CF70246821 target/xtensa-esp32s3-espidf/release/robot-controller
 ```
 
-Press reset to run the demo again. After the demo the servos keep holding the final pose;
-set `RELEASE_AT_END` in `src/main.rs` to cut servo power instead (the robot then goes limp).
+After boot the servos hold neutral until a command arrives. Commands sent while the robot is
+offline are lost.
 
 ## Code layout
 
@@ -136,16 +220,22 @@ set `RELEASE_AT_END` in `src/main.rs` to cut servo power instead (the robot then
 |---|---|---|
 | `src/robot_16_dof/servo.rs` | Joint list, calibration table, angle to PWM tick conversion | none |
 | `src/robot_16_dof/pca9685.rs` | Minimal PCA9685 driver over a small `Transport` trait | none |
-| `src/robot_16_dof/motion.rs` | Poses, smooth interpolation between them | none |
-| `src/robot_16_dof/moves.rs` | Self-test, joint test, arm up/down, walk | none |
+| `src/robot_16_dof/motion.rs` | Poses, smooth interpolation between them, stopping a move | none |
+| `src/robot_16_dof/moves.rs` | Self-test, joint test, servo moves, sway, stand up/by, dance, arms, walk | none |
 | `src/robot_16_dof/esp32.rs` | PCA9685 over the ESP32-S3's I2C, the real servo `Hardware` | ESP32-S3 |
 | `src/rgb_led/color.rs` | RGB colours and the rainbow fade | none |
+| `src/rgb_led/indicator.rs` | Which colour the status LED shows | none |
 | `src/rgb_led/ws2812.rs` | WS2812 LED driver over the ESP32-S3's RMT peripheral | ESP32-S3 |
-| `src/main.rs` | Demo selection, status-light colours, boot countdown | ESP32-S3 |
+| `src/remote/json.rs` | Small JSON reader for payloads | none |
+| `src/remote/command.rs` | MQTT topic and payload to `Command` | none |
+| `src/remote/status.rs` | Status JSON | none |
+| `src/remote/mqtt.rs` | WiFi and MQTT threads | ESP32-S3 |
+| `src/main.rs` | Boot, command loop, busy/stop handling, LED thread | ESP32-S3 |
 
 The modules marked "none" have no ESP dependencies and carry unit tests. To run them on a PC,
-include `src/robot_16_dof/mod.rs` and `src/rgb_led/mod.rs` from a small test crate with
-`#[path = "..."] mod robot_16_dof;` and `mod rgb_led;`, then `rustc --test` (the ESP-only
+include `src/robot_16_dof/mod.rs`, `src/rgb_led/mod.rs` and `src/remote/mod.rs` from a small
+test crate with `#[path = "..."] mod robot_16_dof;`, `mod rgb_led;` and `mod remote;`, then
+`rustc --test` (the ESP-only
 files are skipped off-target). They are not run by `cargo test` here because the project
 builds only for the ESP32-S3 target.
 
@@ -166,6 +256,6 @@ before it walks reliably; it is a starting point, not a finished gait.
 
 ## Notes
 
-- This project has not been run on hardware yet.
+- Only some joints are verified on hardware so far (see CLAUDE.md).
 - Every pose is clamped to the joint limits in `CALIBRATION`, and the unit tests check that
   the default walk stays inside them.

@@ -81,6 +81,54 @@ impl Joint {
     pub const fn index(self) -> usize {
         self as usize
     }
+
+    /// The snake_case name used in MQTT messages, e.g. "r_hip_roll".
+    pub const fn name(self) -> &'static str {
+        match self {
+            Joint::RAnkleRoll => "r_ankle_roll",
+            Joint::RKneeLower => "r_knee_lower",
+            Joint::RKneeUpper => "r_knee_upper",
+            Joint::RHipRoll => "r_hip_roll",
+            Joint::RShoulderPitch => "r_shoulder_pitch",
+            Joint::RShoulderRoll => "r_shoulder_roll",
+            Joint::RElbow => "r_elbow",
+            Joint::RGripper => "r_gripper",
+            Joint::LGripper => "l_gripper",
+            Joint::LElbow => "l_elbow",
+            Joint::LShoulderRoll => "l_shoulder_roll",
+            Joint::LShoulderPitch => "l_shoulder_pitch",
+            Joint::LHipRoll => "l_hip_roll",
+            Joint::LKneeUpper => "l_knee_upper",
+            Joint::LKneeLower => "l_knee_lower",
+            Joint::LAnkleRoll => "l_ankle_roll",
+        }
+    }
+
+    /// The kit manual's servo number: S1-S8 on the right side, S25-S32 on the left.
+    pub const fn servo_number(self) -> u8 {
+        let i = self.index() as u8;
+        if i < 8 {
+            i + 1
+        } else {
+            i + 17
+        }
+    }
+
+    /// Accepts the joint name ("r_hip_roll") or the kit's servo number with or without the
+    /// "s" ("s4", "S4", "4"). Case-insensitive.
+    pub fn parse(text: &str) -> Option<Joint> {
+        let text = text.trim().to_ascii_lowercase();
+        let number = text.strip_prefix('s').unwrap_or(&text).parse::<u8>().ok();
+        Joint::ALL
+            .into_iter()
+            .find(|j| j.name() == text || number == Some(j.servo_number()))
+    }
+}
+
+/// Clamps a logical angle to the joint's calibrated limits.
+pub fn clamp_to_limits(joint: Joint, deg: f32) -> f32 {
+    let cal = &CALIBRATION[joint.index()];
+    deg.clamp(cal.min_deg, cal.max_deg)
 }
 
 /// Per-joint calibration.
@@ -220,6 +268,29 @@ mod tests {
         for (i, j) in Joint::ALL.iter().enumerate() {
             assert_eq!(j.index(), i);
         }
+    }
+
+    #[test]
+    fn joints_parse_by_name_and_servo_number() {
+        assert_eq!(Joint::parse("r_hip_roll"), Some(Joint::RHipRoll));
+        assert_eq!(Joint::parse(" L_Gripper "), Some(Joint::LGripper));
+        assert_eq!(Joint::parse("s4"), Some(Joint::RHipRoll));
+        assert_eq!(Joint::parse("S25"), Some(Joint::LGripper));
+        assert_eq!(Joint::parse("32"), Some(Joint::LAnkleRoll));
+        assert_eq!(Joint::parse("s9"), None);
+        assert_eq!(Joint::parse("hip"), None);
+        for j in Joint::ALL {
+            assert_eq!(Joint::parse(j.name()), Some(j));
+            assert_eq!(Joint::parse(&format!("s{}", j.servo_number())), Some(j));
+        }
+    }
+
+    #[test]
+    fn clamp_to_limits_uses_the_joints_calibration() {
+        let cal = &CALIBRATION[Joint::RHipRoll.index()];
+        assert_eq!(clamp_to_limits(Joint::RHipRoll, 500.0), cal.max_deg);
+        assert_eq!(clamp_to_limits(Joint::RHipRoll, -5.0), cal.min_deg);
+        assert_eq!(clamp_to_limits(Joint::RHipRoll, 95.0), 95.0);
     }
 
     #[test]

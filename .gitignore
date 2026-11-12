@@ -1,4 +1,5 @@
 /target
+cfg.toml
 /.embuild
 .idea/
 .DS_Store
