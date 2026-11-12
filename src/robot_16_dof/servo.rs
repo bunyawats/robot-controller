@@ -119,12 +119,12 @@ pub const CALIBRATION: [Calib; NUM_JOINTS] = [
     c(2, 40.0, 140.0),  // RKneeUpper     S3
     c(3, 50.0, 130.0),  // RHipRoll       S4
     c(4, 10.0, 170.0),  // RShoulderPitch S5
-    c(5, 20.0, 160.0),  // RShoulderRoll  S6
+    Calib { invert: true, ..c(5, 20.0, 160.0) }, // RShoulderRoll S6 (checked 2026-10-12)
     c(6, 20.0, 160.0),  // RElbow         S7
     c(7, 20.0, 160.0),  // RGripper       S8
     Calib { invert: true, ..c(8, 20.0, 160.0) }, // LGripper S25 (mirrored; checked 2026-10-11)
     c(9, 20.0, 160.0),  // LElbow         S26
-    c(10, 20.0, 160.0), // LShoulderRoll  S27
+    Calib { invert: true, ..c(10, 20.0, 160.0) }, // LShoulderRoll S27 (mirrors S6; direction not yet checked)
     Calib { invert: true, ..c(11, 10.0, 170.0) }, // LShoulderPitch S28 (mirrored; checked 2026-10-11)
     c(12, 50.0, 130.0), // LHipRoll       S29
     c(13, 40.0, 140.0), // LKneeUpper     S30
