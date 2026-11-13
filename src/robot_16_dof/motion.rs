@@ -29,7 +29,6 @@ impl Pose {
         self
     }
 
-    #[allow(dead_code)] // used by the tests; kept for writing moves
     pub fn get(&self, joint: Joint) -> f32 {
         self.0[joint.index()]
     }

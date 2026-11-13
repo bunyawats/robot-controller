@@ -128,6 +128,7 @@ under `topic_prefix` (default `robot`):
 | `robot/led` | `off`, `auto`, `rainbow`, `red`/`green`/`blue`/`yellow`/`cyan`/`magenta`/`orange`/`white`, `#rrggbb` or `{"r":0,"g":40,"b":0}` | Sets the LED (applied at once, even while busy) |
 | `robot/cmd` | an action word, or `{"cmd":"walk","steps":6}` | Runs an action (below) |
 | `robot/status` | published by the robot | `{"state":"busy","action":"walk","reason":"started","error":null}` |
+| `robot/pose` | published by the robot | `{"r_ankle_roll":90.0,"r_knee_lower":75.5,...}`: every joint's angle |
 
 - **Joints** are named `r_ankle_roll`, `r_knee_lower`, `r_knee_upper`, `r_hip_roll`,
   `r_shoulder_pitch`, `r_shoulder_roll`, `r_elbow`, `r_gripper` and the same with `l_`, or
@@ -165,6 +166,11 @@ other robot commands are rejected with `"reason":"rejected_busy"`; LED commands 
 still work. Invalid messages get `"reason":"rejected_invalid"` with the problem in `error`.
 Every action publishes `started` and then `done` or `stopped`, and a `heartbeat` goes out
 every 30 s.
+
+`robot/pose` carries all 16 joints (logical degrees to 0.1, clamped to the calibrated
+limits, in `Joint` order). It is sent at most once (QoS 0) every 100 ms while the robot
+moves, then once with the final pose when each command ends, and once when the broker
+connects. Nothing is sent while the robot stands still, and nothing without the PCA9685.
 
 After `release`, the next move re-energizes every servo at once from the last commanded
 pose; send `stand_up` first.
@@ -229,6 +235,7 @@ offline are lost.
 | `src/remote/json.rs` | Small JSON reader for payloads | none |
 | `src/remote/command.rs` | MQTT topic and payload to `Command` | none |
 | `src/remote/status.rs` | Status JSON | none |
+| `src/remote/pose.rs` | Pose JSON and its 10 Hz throttle | none |
 | `src/remote/mqtt.rs` | WiFi and MQTT threads | ESP32-S3 |
 | `src/main.rs` | Boot, command loop, busy/stop handling, LED thread | ESP32-S3 |
 

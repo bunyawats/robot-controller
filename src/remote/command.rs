@@ -23,6 +23,8 @@ use crate::robot_16_dof::servo::Joint;
 pub const SUBSCRIBE_TOPICS: [&str; 4] = ["servo/+", "servos", "led", "cmd"];
 /// Subtopic the device publishes its status on. Not under any subscribed topic.
 pub const STATUS_TOPIC: &str = "status";
+/// Subtopic the device publishes its joint angles on (see `remote::pose`).
+pub const POSE_TOPIC: &str = "pose";
 
 /// Longer payloads are rejected without parsing.
 pub const MAX_PAYLOAD_BYTES: usize = 512;

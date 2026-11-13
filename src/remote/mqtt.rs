@@ -10,8 +10,8 @@
 //! - Subscriber: while not subscribed (boot, or after any disconnect, since the client uses a
 //!   clean session), retries the subscriptions every `SUBSCRIBE_RETRY_MS`. It polls a flag
 //!   rather than waiting for a Connected event, which has been seen to hang.
-//! - Status publisher: the only thread that calls `publish()`; it sends each string from
-//!   `status_rx` to `<prefix>/status`.
+//! - Publisher: the only thread that calls `publish()`; it sends each `Outgoing` from
+//!   `out_rx` to `<prefix>/status` or `<prefix>/pose`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -26,7 +26,7 @@ use esp_idf_svc::mqtt::client::{EspMqttClient, EventPayload, MqttClientConfigura
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi};
 
-use super::command::{STATUS_TOPIC, SUBSCRIBE_TOPICS};
+use super::command::{POSE_TOPIC, STATUS_TOPIC, SUBSCRIBE_TOPICS};
 
 const SUBSCRIBE_RETRY_MS: u64 = 500;
 const WIFI_CHECK_SECS: u64 = 5;
@@ -44,6 +44,14 @@ pub struct NetConfig {
 
 type Client = Arc<Mutex<EspMqttClient<'static>>>;
 
+/// A message for the publisher thread.
+pub enum Outgoing {
+    /// Status JSON (`remote::status`), sent at least once.
+    Status(String),
+    /// Pose JSON (`remote::pose`), sent at most once: a lost frame is soon replaced.
+    Pose(String),
+}
+
 /// Brings WiFi up and starts the MQTT threads, then returns. A failed WiFi connect at boot is
 /// only logged; the watchdog keeps retrying.
 ///
@@ -53,7 +61,7 @@ type Client = Arc<Mutex<EspMqttClient<'static>>>;
 pub fn start(
     modem: Modem<'static>,
     cfg: NetConfig,
-    status_rx: Receiver<String>,
+    out_rx: Receiver<Outgoing>,
     mut on_message: impl FnMut(&str, &[u8]) + Send + 'static,
     on_connection: impl Fn(bool) + Send + Sync + 'static,
 ) -> anyhow::Result<()> {
@@ -114,17 +122,17 @@ pub fn start(
 
     {
         let client = client.clone();
-        let topic = format!("{}/{STATUS_TOPIC}", cfg.topic_prefix);
-        spawn("mqtt_status", move || {
-            while let Ok(payload) = status_rx.recv() {
-                let sent = client.lock().unwrap().publish(
-                    &topic,
-                    QoS::AtLeastOnce,
-                    false,
-                    payload.as_bytes(),
-                );
+        let status_topic = format!("{}/{STATUS_TOPIC}", cfg.topic_prefix);
+        let pose_topic = format!("{}/{POSE_TOPIC}", cfg.topic_prefix);
+        spawn("mqtt_publish", move || {
+            while let Ok(msg) = out_rx.recv() {
+                let (topic, qos, payload) = match &msg {
+                    Outgoing::Status(p) => (&status_topic, QoS::AtLeastOnce, p),
+                    Outgoing::Pose(p) => (&pose_topic, QoS::AtMostOnce, p),
+                };
+                let sent = client.lock().unwrap().publish(topic, qos, false, payload.as_bytes());
                 if let Err(e) = sent {
-                    log::warn!("Failed to publish status: {e:?}");
+                    log::warn!("Failed to publish to {topic}: {e:?}");
                 }
             }
         })?;
