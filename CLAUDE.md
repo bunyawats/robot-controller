@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ESP32-S3 firmware (Rust, `esp-idf-svc` std stack) for a 16-servo biped driven through a PCA9685 over I2C (SDA GPIO8, SCL GPIO9, addr 0x40). Controlled over MQTT (single servo, several servos, the RGB LED, named actions); the topic contract is in README.md ("MQTT control") and `src/remote/command.rs`. The WiFi/MQTT threading is copied from the sibling `esp32-mqtt-relay` project (`~/Projects/Rust/esp32_mqtt_4_relay`). Hardware bring-up is in progress. See README.md for wiring, power, and the first-run calibration procedure.
 
+The phone controller (Bevy/wasm canvas UI + Axum BFF bridging WebSocket to this firmware's MQTT topics) lives in a separate repo, `~/Projects/Rust/robot-console` (GitHub `bunyawats/robot-console`), together with its design spec and implementation plan (`docs/`). The BFF depends on this firmware's MQTT contract: when adding or changing topics, actions or status fields (e.g. `robot/pose`, or the planned walk backward, `turn`, `spread_arms` and an `led` field in status), update robot-console's `bff/src/mapping.rs` and its docs too.
+
 ## Build and flash
 
 The toolchain is pinned to `esp-1.98` in `rust-toolchain.toml` (the 1.99.0.0 esp release fails to build std for espidf with "`AT_FDCWD` not found in `libc`"). Don't bump it casually.
