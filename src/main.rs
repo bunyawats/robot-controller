@@ -9,6 +9,9 @@
 //! Threads: the main thread owns the robot and runs one robot command at a time. The MQTT
 //! drainer thread parses messages and, without blocking, either rejects them, applies them
 //! (LED, stop) or hands them to the main thread. The LED thread owns the WS2812.
+//!
+//! While the robot moves, its joint angles go out on `<prefix>/pose` at 10 Hz, plus the
+//! final pose after every command and the current one whenever the broker connects.
 
 mod remote;
 mod rgb_led;
@@ -25,11 +28,12 @@ use esp_idf_svc::hal::gpio::OutputPin;
 use esp_idf_svc::hal::peripherals::Peripherals;
 
 use remote::command::{self, Command, RobotCommand};
-use remote::mqtt::{self, NetConfig};
+use remote::mqtt::{self, NetConfig, Outgoing};
+use remote::pose::{self as pose_msg, Throttle};
 use remote::status::{self, Snapshot};
 use rgb_led::indicator::{Activity, Indicator, LedMsg};
 use rgb_led::ws2812::Ws2812;
-use robot_16_dof::esp32::{self as robot_esp32, FaultSignal, Servos};
+use robot_16_dof::esp32::{self as robot_esp32, FaultSignal, PoseSink, Servos};
 use robot_16_dof::motion::{Pose, Robot};
 use robot_16_dof::moves::{self, DEFAULT_GAIT};
 use robot_16_dof::servo::Joint;
@@ -70,7 +74,7 @@ const HEARTBEAT_SECS: u64 = 30;
 const RAINBOW_STEP: Duration = Duration::from_millis(10);
 const LED_THREAD_STACK: usize = 4 * 1024;
 
-type RobotHw = Robot<Servos<LedLink>>;
+type RobotHw = Robot<Servos<LedLink, PoseLink>>;
 
 /// Sends LED messages to the LED thread.
 struct LedLink(Sender<LedMsg>);
@@ -88,6 +92,22 @@ impl FaultSignal for LedLink {
     }
 }
 
+/// Keeps the latest servo frame and publishes every `POSE_INTERVAL_MS` of movement.
+struct PoseLink {
+    out_tx: Sender<Outgoing>,
+    latest: Arc<Mutex<Pose>>,
+    throttle: Throttle,
+}
+
+impl PoseSink for PoseLink {
+    fn frame(&mut self, pose: &Pose) {
+        *self.latest.lock().unwrap() = *pose;
+        if self.throttle.tick() {
+            let _ = self.out_tx.send(Outgoing::Pose(pose_msg::json(pose)));
+        }
+    }
+}
+
 /// State shared between the main thread and the MQTT threads.
 #[derive(Clone)]
 struct Shared {
@@ -99,8 +119,10 @@ struct Shared {
     snapshot: Arc<Mutex<Snapshot>>,
     /// False when the PCA9685 didn't answer at boot.
     servos_ok: bool,
-    status_tx: Sender<String>,
+    out_tx: Sender<Outgoing>,
     led_tx: Sender<LedMsg>,
+    /// The last frame written to the servos (neutral until the first one).
+    pose: Arc<Mutex<Pose>>,
 }
 
 impl Shared {
@@ -109,7 +131,17 @@ impl Shared {
     }
 
     fn publish(&self, snapshot: Snapshot, reason: &str, error: Option<&str>) {
-        let _ = self.status_tx.send(status::json(snapshot, reason, error));
+        let _ = self
+            .out_tx
+            .send(Outgoing::Status(status::json(snapshot, reason, error)));
+    }
+
+    /// Publishes the last written frame now, outside the 10 Hz stream. No-op without servos.
+    fn publish_pose(&self) {
+        if self.servos_ok {
+            let pose = *self.pose.lock().unwrap();
+            let _ = self.out_tx.send(Outgoing::Pose(pose_msg::json(&pose)));
+        }
     }
 
     fn publish_now(&self, reason: &str, error: Option<&str>) {
@@ -143,7 +175,7 @@ fn main() -> anyhow::Result<()> {
     .inspect_err(|e| log::error!("{e:#}; continuing without servos (robot commands rejected)"))
     .ok();
 
-    let (status_tx, status_rx) = mpsc::channel();
+    let (out_tx, out_rx) = mpsc::channel();
     let shared = Shared {
         busy: Arc::new(AtomicBool::new(false)),
         abort: Arc::new(AtomicBool::new(false)),
@@ -153,8 +185,9 @@ fn main() -> anyhow::Result<()> {
             Snapshot::NO_SERVOS
         })),
         servos_ok: pca.is_some(),
-        status_tx,
+        out_tx,
         led_tx: led_tx.clone(),
+        pose: Arc::new(Mutex::new(Pose::neutral())),
     };
 
     let robot = pca.map(|pca| {
@@ -163,7 +196,13 @@ fn main() -> anyhow::Result<()> {
             log::info!("Starting in {s}s - hands off the robot");
             FreeRtos::delay_ms(1000);
         }
-        let mut robot = Robot::new(Servos::new(pca, LedLink(led_tx), shared.abort.clone()));
+        let pose_link = PoseLink {
+            out_tx: shared.out_tx.clone(),
+            latest: shared.pose.clone(),
+            throttle: Throttle::default(),
+        };
+        let servos = Servos::new(pca, LedLink(led_tx), pose_link, shared.abort.clone());
+        let mut robot = Robot::new(servos);
         // The servos' real positions are unknown until first commanded, so this first write
         // snaps every joint to neutral at once.
         robot.snap_to(&Pose::neutral());
@@ -188,6 +227,7 @@ fn main() -> anyhow::Result<()> {
             shared.led(LedMsg::Connected(up));
             if up {
                 shared.publish_now("connected", None);
+                shared.publish_pose();
             }
         }
     };
@@ -200,7 +240,7 @@ fn main() -> anyhow::Result<()> {
             mqtt_client_id: config.mqtt_client_id,
             topic_prefix: prefix,
         },
-        status_rx,
+        out_rx,
         on_message,
         on_connection,
     )?;
@@ -282,6 +322,8 @@ fn run_commands(robot: &mut RobotHw, shared: &Shared, robot_rx: Receiver<RobotCo
 
         run(robot, &cmd);
 
+        robot.hardware_mut().pose_sink.throttle.reset();
+        shared.publish_pose();
         let stopped = robot.aborted();
         robot.clear_abort();
         shared.abort.store(false, Ordering::SeqCst);

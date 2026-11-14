@@ -5,6 +5,7 @@
 
 pub mod command;
 pub mod json;
+pub mod pose;
 pub mod status;
 
 #[cfg(target_os = "espidf")]

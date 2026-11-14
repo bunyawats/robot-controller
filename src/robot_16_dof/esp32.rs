@@ -69,29 +69,37 @@ pub trait FaultSignal {
     fn fault(&mut self);
 }
 
+/// Told about every frame written to the servos, e.g. to publish the pose.
+pub trait PoseSink {
+    fn frame(&mut self, pose: &Pose);
+}
+
 /// The real robot: poses become PCA9685 tick values through the calibration table.
-pub struct Servos<F: FaultSignal> {
+pub struct Servos<F: FaultSignal, P: PoseSink> {
     pub pca: Pca9685<I2cBus>,
     pub fault_signal: F,
+    pub pose_sink: P,
     /// Set by the first failed write, which is the only one passed to `fault_signal`.
     pub write_failed: bool,
     /// Set from another thread to stop the current move (see `motion::Robot`).
     abort: Arc<AtomicBool>,
 }
 
-impl<F: FaultSignal> Servos<F> {
-    pub fn new(pca: Pca9685<I2cBus>, fault_signal: F, abort: Arc<AtomicBool>) -> Self {
+impl<F: FaultSignal, P: PoseSink> Servos<F, P> {
+    pub fn new(pca: Pca9685<I2cBus>, fault_signal: F, pose_sink: P, abort: Arc<AtomicBool>) -> Self {
         Self {
             pca,
             fault_signal,
+            pose_sink,
             write_failed: false,
             abort,
         }
     }
 }
 
-impl<F: FaultSignal> Hardware for Servos<F> {
+impl<F: FaultSignal, P: PoseSink> Hardware for Servos<F, P> {
     fn write_pose(&mut self, pose: &Pose) {
+        self.pose_sink.frame(pose);
         let ticks = servo::pose_to_ticks(&pose.0, &servo::CALIBRATION);
         if let Err(e) = self.pca.set_all_ticks(&ticks) {
             log::error!("I2C write to PCA9685 failed: {e:?}");
