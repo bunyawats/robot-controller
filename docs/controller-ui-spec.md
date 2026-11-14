@@ -105,10 +105,14 @@ One WebSocket at `/ws`, JSON text frames tagged by `type`, defined once as serde
 {"type":"action","id":18,"action":"turn_left"}
 {"type":"stop","id":19}
 {"type":"led","id":20,"mode":"rainbow"}
+{"type":"hold","action":"walk_forward","held":true}
+{"type":"hold","action":"walk_forward","held":false}
 {"type":"ping","t":1731571200000}
 ```
 
 `action` is one of `walk_forward`, `walk_backward`, `turn_left`, `turn_right`, `stand_up`, `stand_by`, `sway`, `spread_arms`. `mode` is `rainbow`, `auto`, `off` or a named colour.
+
+`hold` drives the hold-to-walk loop for a D-pad direction (`walk_forward`, `walk_backward`, `turn_left`, `turn_right`). With `held: true` the BFF sends a 2-step move at once and another after each `done`; with `held: false` it sends no more, and the move in progress finishes. It carries no `id` and gets no `ack`: each move's outcome arrives as `status`. The loop also ends on `stop`, on a rejected move, or when the socket closes. A tap is a plain `action`.
 
 **BFF → UI**
 
